@@ -4,7 +4,6 @@ import lol.ohai.regex.syntax.ast.*;
 import lol.ohai.regex.syntax.hir.ClassUnicode.ClassUnicodeRange;
 import lol.ohai.regex.syntax.hir.unicode.PerlClassTables;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -14,7 +13,7 @@ import java.util.List;
  * <p>The translator walks the AST tree and produces a simplified, normalized
  * HIR. Unicode properties are resolved (currently stubbed out), character
  * classes are flattened into sorted non-overlapping ranges, flags are applied,
- * and literals are encoded as UTF-8 byte sequences.
+ * and literals are stored as UTF-16 char sequences.
  */
 public final class Translator {
 
@@ -138,7 +137,7 @@ public final class Translator {
                 cls.caseFoldSimple();
                 return new Hir.Class(cls);
             }
-            return new Hir.Literal(charToUtf8(c));
+            return new Hir.Literal(codePointToChars((int) c));
         }
 
         // --- Dot ---
@@ -501,10 +500,10 @@ public final class Translator {
         }
 
         /**
-         * Encode a single char (BMP codepoint) to UTF-8 bytes.
+         * Convert a Unicode codepoint to a UTF-16 char array.
          */
-        private static byte[] charToUtf8(char c) {
-            return String.valueOf(c).getBytes(StandardCharsets.UTF_8);
+        private static char[] codePointToChars(int cp) {
+            return Character.toChars(cp);
         }
     }
 }

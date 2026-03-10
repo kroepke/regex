@@ -17,37 +17,34 @@ public sealed interface Hir {
     record Empty() implements Hir {}
 
     /**
-     * A literal byte sequence (UTF-8 encoded).
+     * A literal UTF-16 char sequence.
      *
      * <p>We override equals/hashCode because the default record implementation
-     * uses reference equality for byte arrays.
+     * uses reference equality for char arrays.
      */
-    record Literal(byte[] bytes) implements Hir {
+    record Literal(char[] chars) implements Hir {
         public Literal {
-            Objects.requireNonNull(bytes);
+            Objects.requireNonNull(chars);
         }
 
         @Override
         public boolean equals(Object o) {
-            return o instanceof Literal lit && Arrays.equals(bytes, lit.bytes);
+            return o instanceof Literal lit && Arrays.equals(chars, lit.chars);
         }
 
         @Override
         public int hashCode() {
-            return Arrays.hashCode(bytes);
+            return Arrays.hashCode(chars);
         }
 
         @Override
         public String toString() {
-            return "Literal" + Arrays.toString(bytes);
+            return "Literal" + Arrays.toString(chars);
         }
     }
 
     /** A character class (Unicode codepoint ranges). */
     record Class(ClassUnicode unicode) implements Hir {}
-
-    /** A byte-oriented character class. */
-    record ClassB(ClassBytes bytes) implements Hir {}
 
     /** A zero-width assertion. */
     record Look(LookKind look) implements Hir {}

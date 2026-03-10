@@ -5,7 +5,6 @@ import lol.ohai.regex.syntax.ast.Parser;
 import lol.ohai.regex.syntax.hir.ClassUnicode.ClassUnicodeRange;
 import org.junit.jupiter.api.Test;
 
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -22,8 +21,8 @@ class HirTest {
         return Translator.translate(pattern, ast);
     }
 
-    private static byte[] utf8(String s) {
-        return s.getBytes(StandardCharsets.UTF_8);
+    private static char[] chars(String s) {
+        return s.toCharArray();
     }
 
     // --- Literals ---
@@ -31,15 +30,14 @@ class HirTest {
     @Test
     void translateLiteral() throws Exception {
         Hir hir = t("a");
-        assertEquals(new Hir.Literal(utf8("a")), hir);
+        assertEquals(new Hir.Literal(chars("a")), hir);
     }
 
     @Test
-    void translateMultiByteUtf8() throws Exception {
-        // Euro sign is 3-byte UTF-8: E2 82 AC
+    void translateMultiCharLiteral() throws Exception {
+        // Euro sign is a single BMP char
         Hir hir = t("\u20AC");
-        byte[] expected = "\u20AC".getBytes(StandardCharsets.UTF_8);
-        assertEquals(new Hir.Literal(expected), hir);
+        assertEquals(new Hir.Literal(new char[]{'\u20AC'}), hir);
     }
 
     // --- Dot ---
@@ -79,8 +77,8 @@ class HirTest {
         assertInstanceOf(Hir.Concat.class, hir);
         Hir.Concat concat = (Hir.Concat) hir;
         assertEquals(2, concat.subs().size());
-        assertEquals(new Hir.Literal(utf8("a")), concat.subs().get(0));
-        assertEquals(new Hir.Literal(utf8("b")), concat.subs().get(1));
+        assertEquals(new Hir.Literal(chars("a")), concat.subs().get(0));
+        assertEquals(new Hir.Literal(chars("b")), concat.subs().get(1));
     }
 
     // --- Alternation ---
@@ -91,8 +89,8 @@ class HirTest {
         assertInstanceOf(Hir.Alternation.class, hir);
         Hir.Alternation alt = (Hir.Alternation) hir;
         assertEquals(2, alt.subs().size());
-        assertEquals(new Hir.Literal(utf8("a")), alt.subs().get(0));
-        assertEquals(new Hir.Literal(utf8("b")), alt.subs().get(1));
+        assertEquals(new Hir.Literal(chars("a")), alt.subs().get(0));
+        assertEquals(new Hir.Literal(chars("b")), alt.subs().get(1));
     }
 
     // --- Capture groups ---
@@ -104,7 +102,7 @@ class HirTest {
         Hir.Capture cap = (Hir.Capture) hir;
         assertEquals(1, cap.index());
         assertNull(cap.name());
-        assertEquals(new Hir.Literal(utf8("a")), cap.sub());
+        assertEquals(new Hir.Literal(chars("a")), cap.sub());
     }
 
     @Test
@@ -114,14 +112,14 @@ class HirTest {
         Hir.Capture cap = (Hir.Capture) hir;
         assertEquals(1, cap.index());
         assertEquals("foo", cap.name());
-        assertEquals(new Hir.Literal(utf8("a")), cap.sub());
+        assertEquals(new Hir.Literal(chars("a")), cap.sub());
     }
 
     @Test
     void translateNonCapturing() throws Exception {
         Hir hir = t("(?:a)");
         // Non-capturing group is transparent
-        assertEquals(new Hir.Literal(utf8("a")), hir);
+        assertEquals(new Hir.Literal(chars("a")), hir);
     }
 
     // --- Repetition ---
@@ -134,7 +132,7 @@ class HirTest {
         assertEquals(0, rep.min());
         assertEquals(Hir.Repetition.UNBOUNDED, rep.max());
         assertTrue(rep.greedy());
-        assertEquals(new Hir.Literal(utf8("a")), rep.sub());
+        assertEquals(new Hir.Literal(chars("a")), rep.sub());
     }
 
     @Test
@@ -224,7 +222,7 @@ class HirTest {
     void translateCaseInsensitiveNonLetter() throws Exception {
         Hir hir = t("(?i)1");
         // '1' is not a letter, so it stays as a literal
-        assertEquals(new Hir.Literal(utf8("1")), hir);
+        assertEquals(new Hir.Literal(chars("1")), hir);
     }
 
     // --- Perl character classes (ASCII mode) ---
@@ -429,7 +427,7 @@ class HirTest {
         // First should be a class (case insensitive a)
         assertInstanceOf(Hir.Class.class, concat.subs().get(0));
         // Second should be a plain literal 'b'
-        assertEquals(new Hir.Literal(utf8("b")), concat.subs().get(1));
+        assertEquals(new Hir.Literal(chars("b")), concat.subs().get(1));
     }
 
     // --- Unicode property classes (should error for now) ---
