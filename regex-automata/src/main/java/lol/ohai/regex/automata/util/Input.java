@@ -49,6 +49,27 @@ public final class Input {
         return create(text, 0, text.length(), true);
     }
 
+    /**
+     * Creates a search input with explicit byte-level bounds and anchored flag.
+     * The full text is encoded to UTF-8, but the search is restricted to the
+     * byte range [byteStart, byteEnd).
+     *
+     * @param text      the input text
+     * @param byteStart the byte offset at which to start searching (inclusive)
+     * @param byteEnd   the byte offset at which to stop searching (exclusive)
+     * @param anchored  whether the search is anchored
+     * @return the configured Input
+     */
+    public static Input withByteBounds(CharSequence text, int byteStart, int byteEnd, boolean anchored) {
+        // Encode the full text first, then override start/end with byte offsets.
+        Input full = create(text, 0, text.length(), anchored);
+        if (byteStart < 0 || byteEnd > full.haystack.length || byteStart > byteEnd) {
+            throw new IllegalArgumentException(
+                "invalid byte bounds: [" + byteStart + ", " + byteEnd + ") for haystack of " + full.haystack.length + " bytes");
+        }
+        return new Input(full.haystack, byteStart, byteEnd, anchored, full.byteToChar);
+    }
+
     private static Input create(CharSequence text, int charStart, int charEnd, boolean anchored) {
         // Encode the full text to UTF-8 and build byte-to-char mapping.
         // We encode the entire CharSequence so that look-behind at the search boundaries works.
