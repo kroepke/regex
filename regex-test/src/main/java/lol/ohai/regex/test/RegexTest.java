@@ -213,4 +213,17 @@ public class RegexTest {
     public String toString() {
         return "RegexTest{name='" + fullName() + "', regex=" + regexes() + "}";
     }
+
+    /**
+     * Factory method for creating test instances programmatically (for unit testing).
+     */
+    public static RegexTest forTest(String name, String regex, String haystack, List<Captures> matches) {
+        RegexTest t = new RegexTest();
+        t.name = name;
+        t.regexRaw = regex;
+        t.haystack = haystack;
+        t.matches = matches;
+        t.groupName = "test";
+        return t;
+    }
 }
