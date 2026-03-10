@@ -1,14 +1,19 @@
 package lol.ohai.regex;
 
+import lol.ohai.regex.automata.meta.MultiLiteral;
+import lol.ohai.regex.automata.meta.Prefilter;
+import lol.ohai.regex.automata.meta.SingleLiteral;
+import lol.ohai.regex.automata.meta.Strategy;
 import lol.ohai.regex.automata.nfa.thompson.BuildError;
 import lol.ohai.regex.automata.nfa.thompson.Compiler;
 import lol.ohai.regex.automata.nfa.thompson.NFA;
-import lol.ohai.regex.automata.nfa.thompson.pikevm.Cache;
 import lol.ohai.regex.automata.nfa.thompson.pikevm.PikeVM;
 import lol.ohai.regex.automata.util.Input;
 import lol.ohai.regex.syntax.ast.Ast;
 import lol.ohai.regex.syntax.ast.Parser;
 import lol.ohai.regex.syntax.hir.Hir;
+import lol.ohai.regex.syntax.hir.LiteralExtractor;
+import lol.ohai.regex.syntax.hir.LiteralSeq;
 import lol.ohai.regex.syntax.hir.Translator;
 
 import java.util.*;
@@ -18,7 +23,7 @@ import java.util.stream.StreamSupport;
 /**
  * A compiled regular expression. Thread-safe: can be shared across threads.
  *
- * <p>Compilation pipeline: pattern → AST → HIR → NFA → PikeVM.</p>
+ * <p>Compilation pipeline: pattern → AST → HIR → Strategy (prefilter + engine).</p>
  *
  * <p>Usage:</p>
  * <pre>{@code
@@ -32,17 +37,15 @@ import java.util.stream.StreamSupport;
  */
 public final class Regex {
     private final String pattern;
-    private final PikeVM pikeVM;
-    private final NFA nfa;
+    private final Strategy strategy;
     private final Map<String, Integer> namedGroups;
-    private final ThreadLocal<Cache> cachePool;
+    private final ThreadLocal<Strategy.Cache> cachePool;
 
-    private Regex(String pattern, PikeVM pikeVM) {
+    private Regex(String pattern, Strategy strategy, Map<String, Integer> namedGroups) {
         this.pattern = pattern;
-        this.pikeVM = pikeVM;
-        this.nfa = pikeVM.nfa();
-        this.namedGroups = buildNamedGroupMap(nfa);
-        this.cachePool = ThreadLocal.withInitial(pikeVM::createCache);
+        this.strategy = strategy;
+        this.namedGroups = namedGroups;
+        this.cachePool = ThreadLocal.withInitial(strategy::createCache);
     }
 
     /**
@@ -68,9 +71,27 @@ public final class Regex {
         try {
             Ast ast = Parser.parse(pattern, nestLimit);
             Hir hir = Translator.translate(pattern, ast);
-            NFA nfa = Compiler.compile(hir);
-            PikeVM pikeVM = new PikeVM(nfa);
-            return new Regex(pattern, pikeVM);
+
+            // Extract prefix literals for prefilter
+            LiteralSeq prefixes = LiteralExtractor.extractPrefixes(hir);
+            Prefilter prefilter = buildPrefilter(prefixes);
+
+            // Select strategy
+            Strategy strategy;
+            Map<String, Integer> namedGroups;
+
+            if (prefilter != null && prefilter.isExact()
+                    && prefixes.coversEntirePattern() && !hirHasCaptures(hir)) {
+                strategy = new Strategy.PrefilterOnly(prefilter);
+                namedGroups = Collections.emptyMap();
+            } else {
+                NFA nfa = Compiler.compile(hir);
+                PikeVM pikeVM = new PikeVM(nfa);
+                strategy = new Strategy.Core(pikeVM, prefilter);
+                namedGroups = buildNamedGroupMap(nfa);
+            }
+
+            return new Regex(pattern, strategy, namedGroups);
         } catch (lol.ohai.regex.syntax.ast.Error | lol.ohai.regex.syntax.hir.Error e) {
             throw new PatternSyntaxException(pattern, e);
         } catch (BuildError e) {
@@ -87,9 +108,9 @@ public final class Regex {
      * Returns true if the pattern matches anywhere in the input.
      */
     public boolean isMatch(CharSequence text) {
-        Cache cache = cachePool.get();
+        Strategy.Cache cache = cachePool.get();
         Input input = Input.of(text);
-        return pikeVM.isMatch(input, cache);
+        return strategy.isMatch(input, cache);
     }
 
     /**
@@ -98,9 +119,9 @@ public final class Regex {
      * @return the match, or empty if no match
      */
     public Optional<Match> find(CharSequence text) {
-        Cache cache = cachePool.get();
+        Strategy.Cache cache = cachePool.get();
         Input input = Input.of(text);
-        lol.ohai.regex.automata.util.Captures caps = pikeVM.search(input, cache);
+        lol.ohai.regex.automata.util.Captures caps = strategy.search(input, cache);
         if (caps == null) {
             return Optional.empty();
         }
@@ -124,9 +145,9 @@ public final class Regex {
      * @return the captures, or empty if no match
      */
     public Optional<Captures> captures(CharSequence text) {
-        Cache cache = cachePool.get();
+        Strategy.Cache cache = cachePool.get();
         Input input = Input.of(text);
-        lol.ohai.regex.automata.util.Captures caps = pikeVM.searchCaptures(input, cache);
+        lol.ohai.regex.automata.util.Captures caps = strategy.searchCaptures(input, cache);
         if (caps == null) {
             return Optional.empty();
         }
@@ -150,6 +171,25 @@ public final class Regex {
     }
 
     // -- Internal helpers --
+
+    private static Prefilter buildPrefilter(LiteralSeq prefixes) {
+        return switch (prefixes) {
+            case LiteralSeq.None ignored -> null;
+            case LiteralSeq.Single single -> new SingleLiteral(single.literal());
+            case LiteralSeq.Alternation alt -> new MultiLiteral(
+                    alt.literals().toArray(char[][]::new));
+        };
+    }
+
+    private static boolean hirHasCaptures(Hir hir) {
+        return switch (hir) {
+            case Hir.Capture ignored -> true;
+            case Hir.Concat concat -> concat.subs().stream().anyMatch(Regex::hirHasCaptures);
+            case Hir.Alternation alt -> alt.subs().stream().anyMatch(Regex::hirHasCaptures);
+            case Hir.Repetition rep -> hirHasCaptures(rep.sub());
+            default -> false;
+        };
+    }
 
     private Match toMatch(CharSequence text,
                           lol.ohai.regex.automata.util.Captures caps, int group) {
@@ -204,8 +244,10 @@ public final class Regex {
             this.text = text;
         }
 
-        abstract lol.ohai.regex.automata.util.Captures doSearch(Input input, Cache cache);
-        abstract T toResult(CharSequence text, lol.ohai.regex.automata.util.Captures caps);
+        abstract lol.ohai.regex.automata.util.Captures doSearch(
+                Input input, Strategy.Cache cache);
+        abstract T toResult(CharSequence text,
+                            lol.ohai.regex.automata.util.Captures caps);
 
         @Override
         public boolean hasNext() {
@@ -224,7 +266,7 @@ public final class Regex {
         }
 
         private void advance() {
-            Cache cache = cachePool.get();
+            Strategy.Cache cache = cachePool.get();
 
             while (!done) {
                 if (searchCharStart > text.length()) {
@@ -259,10 +301,6 @@ public final class Regex {
                 lastMatchCharEnd = charEnd;
                 searchCharStart = charEnd;
 
-                // For empty matches, set searchCharStart to charEnd so the next search
-                // starts from the same position. The duplicate detection above will then
-                // skip and advance if the same empty match is found again.
-
                 nextResult = toResult(text, caps);
                 return;
             }
@@ -273,12 +311,14 @@ public final class Regex {
         MatchIterator(CharSequence text) { super(text); }
 
         @Override
-        lol.ohai.regex.automata.util.Captures doSearch(Input input, Cache cache) {
-            return pikeVM.search(input, cache);
+        lol.ohai.regex.automata.util.Captures doSearch(
+                Input input, Strategy.Cache cache) {
+            return strategy.search(input, cache);
         }
 
         @Override
-        Match toResult(CharSequence text, lol.ohai.regex.automata.util.Captures caps) {
+        Match toResult(CharSequence text,
+                       lol.ohai.regex.automata.util.Captures caps) {
             return toMatch(text, caps, 0);
         }
     }
@@ -287,12 +327,14 @@ public final class Regex {
         CapturesIterator(CharSequence text) { super(text); }
 
         @Override
-        lol.ohai.regex.automata.util.Captures doSearch(Input input, Cache cache) {
-            return pikeVM.searchCaptures(input, cache);
+        lol.ohai.regex.automata.util.Captures doSearch(
+                Input input, Strategy.Cache cache) {
+            return strategy.searchCaptures(input, cache);
         }
 
         @Override
-        Captures toResult(CharSequence text, lol.ohai.regex.automata.util.Captures caps) {
+        Captures toResult(CharSequence text,
+                          lol.ohai.regex.automata.util.Captures caps) {
             return toCaptures(text, caps);
         }
     }
