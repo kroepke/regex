@@ -72,31 +72,31 @@ Patterns that cause catastrophic backtracking in java.util.regex:
 
 | Benchmark | ohai | JDK | Ratio |
 |---|---|---|---|
-| literal | 13.4 | 3,061 | 228x slower |
-| charClass | 0.06 | 272 | ~4,500x slower |
-| alternation | 6.0 | 105 | 18x slower |
-| captures | 55 | 14,673 | 267x slower |
-| unicodeWord | 12.5 | 31,619 | 2,531x slower |
+| literal | 13.7 | 3,201 | 233x slower |
+| charClass | 0.062 | 295 | ~4,750x slower |
+| alternation | 6.1 | 105 | 17x slower |
+| captures | 57 | 14,885 | 261x slower |
+| unicodeWord | 12.1 | 31,946 | 2,643x slower |
 
 ### Pathological patterns (ops/s, higher is better)
 
 | Benchmark | ohai | JDK | Ratio |
 |---|---|---|---|
-| backtrack `(a+)+b` | **439,203** | 193,383 | **2.3x faster** |
-| redosShort | 34,645 | 90,840 | 2.6x slower |
-| redosLong (900KB) | 373 | N/A (hangs) | **ohai wins** |
-| quadratic100 | 1,442 | 108,747 | 75x slower |
-| quadratic1000 | 16.7 | 1,394 | 83x slower |
+| backtrack `(a+)+b` | **449,238** | 219,111 | **2.0x faster** |
+| redosShort | 38,020 | 92,183 | 2.4x slower |
+| redosLong (900KB) | 379 | N/A (hangs) | **ohai wins** |
+| quadratic100 | 1,323 | 111,278 | 84x slower |
+| quadratic1000 | 16.6 | 1,408 | 85x slower |
 
 ### Compilation (ops/s, higher is better)
 
 | Benchmark | ohai | JDK | Ratio |
 |---|---|---|---|
-| simple | 1,100K | 9,946K | 9x slower |
-| medium | 52K | 7,514K | 145x slower |
-| complex | 754K | 12,046K | 16x slower |
-| unicode | 30K | 17,558K | 580x slower |
-| alternation | 425K | 3,800K | 9x slower |
+| simple | 1,089K | 9,883K | 9x slower |
+| medium | 52K | 7,376K | 142x slower |
+| complex | 755K | 11,525K | 15x slower |
+| unicode | 30K | 17,972K | 599x slower |
+| alternation | 434K | 3,900K | 9x slower |
 
 ## Analysis
 
