@@ -22,6 +22,12 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
     Captures search(Input input, Cache cache);
     Captures searchCaptures(Input input, Cache cache);
 
+    /**
+     * Core strategy: PikeVM (and future engines) with an optional prefilter.
+     *
+     * @param pikeVM    the PikeVM engine
+     * @param prefilter the prefilter to use, or {@code null} for pure PikeVM
+     */
     record Core(PikeVM pikeVM, Prefilter prefilter) implements Strategy {
 
         @Override
@@ -34,9 +40,26 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
             if (prefilter == null || input.isAnchored()) {
                 return pikeVM.isMatch(input, cache.pikeVMCache());
             }
-            return prefilterLoop(input, cache,
-                    (in, c) -> pikeVM.isMatch(in, c.pikeVMCache())
-                            ? new Captures(1) : null) != null;
+            return isMatchPrefilter(input, cache);
+        }
+
+        private boolean isMatchPrefilter(Input input, Cache cache) {
+            int start = input.start();
+            int end = input.end();
+            String haystackStr = input.haystackStr();
+
+            while (start < end) {
+                int pos = prefilter.find(haystackStr, start, end);
+                if (pos < 0) {
+                    return false;
+                }
+                Input candidateInput = input.withBounds(pos, end, false);
+                if (pikeVM.isMatch(candidateInput, cache.pikeVMCache())) {
+                    return true;
+                }
+                start = pos + 1;
+            }
+            return false;
         }
 
         @Override
@@ -116,6 +139,10 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
         }
     }
 
+    /**
+     * Per-search mutable state. Wraps a PikeVM cache (if present).
+     * {@code EMPTY} is used by {@link PrefilterOnly} which needs no engine state.
+     */
     record Cache(lol.ohai.regex.automata.nfa.thompson.pikevm.Cache pikeVMCache) {
         static final Cache EMPTY = new Cache(null);
     }
