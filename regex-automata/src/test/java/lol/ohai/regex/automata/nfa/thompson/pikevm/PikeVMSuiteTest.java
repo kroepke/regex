@@ -9,6 +9,7 @@ import lol.ohai.regex.test.*;
 import lol.ohai.regex.test.Span;
 import org.junit.jupiter.api.*;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Stream;
@@ -20,6 +21,10 @@ import java.util.stream.Stream;
  * generates one JUnit dynamic test per test case. The test runner automatically
  * filters out tests that require capabilities we don't support yet (e.g.,
  * overlapping search, leftmost-longest matching).</p>
+ *
+ * <p>The upstream test data uses UTF-8 byte offsets for match spans. Since our
+ * engine now operates on char-unit (UTF-16), we convert the engine's char-offset
+ * results back to byte offsets for comparison with expected test data.</p>
  */
 class PikeVMSuiteTest {
 
@@ -47,7 +52,7 @@ class PikeVMSuiteTest {
             return CompiledRegex.skip();
         }
 
-        // Skip non-UTF-8 tests (we always work with UTF-8 strings)
+        // Skip non-UTF-8 tests (we require valid Unicode input)
         if (!test.utf8()) {
             return CompiledRegex.skip();
         }
@@ -67,6 +72,21 @@ class PikeVMSuiteTest {
             return CompiledRegex.skip();
         }
 
+        // Skip tests with bounds that fall inside a multi-byte UTF-8 codepoint.
+        // These test UTF-8-specific boundary behavior that doesn't apply to our
+        // char-unit (UTF-16) engine.
+        if (test.bounds() != null && hasBoundsInsideCodepoint(test)) {
+            return CompiledRegex.skip();
+        }
+
+        // Skip tests that test UTF-8 byte-oriented iteration semantics on anchored
+        // empty matches. In byte-unit mode, iteration stops when it hits the interior
+        // of a multi-byte codepoint; in char-unit mode, every char position is valid.
+        if ("no-unicode".equals(test.groupName())
+                && test.name().startsWith("anchored-iter-empty")) {
+            return CompiledRegex.skip();
+        }
+
         String pattern = test.regexes().getFirst();
 
         try {
@@ -79,12 +99,6 @@ class PikeVMSuiteTest {
             return CompiledRegex.compiled(t -> runTest(vm, nfa, cache, t));
         } catch (Exception e) {
             if (!test.compiles()) {
-                // Expected compilation failure -- signal to TestRunner that compilation failed
-                // by returning a CompiledRegex. TestRunner checks test.compiles() itself,
-                // but we need to not throw here. The trick: we already caught it, so we
-                // need to signal "compilation failed" back. But TestRunner expects us to
-                // either return a CompiledRegex or throw. If test.compiles() == false and
-                // we throw, TestRunner catches it and returns. So let's throw.
                 throw new RuntimeException("compilation failed as expected", e);
             }
             // Unexpected compilation failure -- skip
@@ -101,28 +115,96 @@ class PikeVMSuiteTest {
                 haystackStr = unescapeHaystack(haystackStr);
             }
 
+            // Build char-to-byte offset mapping for converting results back to byte offsets.
+            // The upstream test suite expects byte offsets (UTF-8).
+            int[] charToByteMap = buildCharToByteMap(haystackStr);
+
             // Determine what kind of result the test expects
             boolean expectsCaptures = test.matches().stream()
                 .anyMatch(c -> c.groups().size() > 1);
 
             if (expectsCaptures) {
-                return collectCaptures(vm, nfa, cache, haystackStr, test);
+                return collectCaptures(vm, nfa, cache, haystackStr, test, charToByteMap);
             } else {
-                return collectMatches(vm, cache, haystackStr, test);
+                return collectMatches(vm, cache, haystackStr, test, charToByteMap);
             }
         } catch (Exception e) {
             return new TestResult.Failed(e.getMessage());
         }
     }
 
+    /**
+     * Builds a mapping from char offset to UTF-8 byte offset for the given string.
+     * The array has length {@code str.length() + 1}, where {@code result[i]} is the
+     * byte offset corresponding to char offset {@code i}.
+     */
+    private static int[] buildCharToByteMap(String str) {
+        int[] map = new int[str.length() + 1];
+        int bytePos = 0;
+        for (int i = 0; i < str.length(); i++) {
+            map[i] = bytePos;
+            int cp = Character.codePointAt(str, i);
+            int charCount = Character.charCount(cp);
+            int byteCount;
+            if (cp <= 0x7F) {
+                byteCount = 1;
+            } else if (cp <= 0x7FF) {
+                byteCount = 2;
+            } else if (cp <= 0xFFFF) {
+                byteCount = 3;
+            } else {
+                byteCount = 4;
+            }
+            bytePos += byteCount;
+            if (charCount == 2) {
+                // Surrogate pair: the next char index maps to the same byte position
+                // (it's part of the same codepoint). Advance i to skip the low surrogate.
+                i++;
+                map[i] = bytePos; // low surrogate maps to byte position after the 4-byte sequence
+            }
+        }
+        map[str.length()] = bytePos;
+        return map;
+    }
+
+    /**
+     * Builds a mapping from UTF-8 byte offset to char offset for the given string.
+     * Used to convert test bounds (which are in byte offsets) to char offsets.
+     */
+    private static int[] buildByteToCharMap(String str) {
+        byte[] utf8 = str.getBytes(StandardCharsets.UTF_8);
+        int[] map = new int[utf8.length + 1];
+        int bytePos = 0;
+        for (int charIdx = 0; charIdx < str.length(); ) {
+            int cp = Character.codePointAt(str, charIdx);
+            int charCount = Character.charCount(cp);
+            int byteCount;
+            if (cp <= 0x7F) {
+                byteCount = 1;
+            } else if (cp <= 0x7FF) {
+                byteCount = 2;
+            } else if (cp <= 0xFFFF) {
+                byteCount = 3;
+            } else {
+                byteCount = 4;
+            }
+            for (int b = 0; b < byteCount; b++) {
+                map[bytePos + b] = charIdx;
+            }
+            bytePos += byteCount;
+            charIdx += charCount;
+        }
+        map[bytePos] = str.length();
+        return map;
+    }
+
     private Input createInput(String haystack, RegexTest test) {
         if (test.bounds() != null) {
-            return Input.withByteBounds(
-                haystack,
-                test.bounds().start(),
-                test.bounds().end(),
-                test.anchored()
-            );
+            // Test bounds are in byte offsets; convert to char offsets
+            int[] byteToChar = buildByteToCharMap(haystack);
+            int charStart = byteToChar[test.bounds().start()];
+            int charEnd = byteToChar[test.bounds().end()];
+            return Input.of(haystack).withBounds(charStart, charEnd, test.anchored());
         } else if (test.anchored()) {
             return Input.anchored(haystack);
         } else {
@@ -130,7 +212,12 @@ class PikeVMSuiteTest {
         }
     }
 
-    private TestResult collectMatches(PikeVM vm, Cache cache, String haystack, RegexTest test) {
+    /** Convert a char offset to a byte offset using the mapping. */
+    private static int charToByte(int[] charToByteMap, int charOffset) {
+        return charToByteMap[charOffset];
+    }
+
+    private TestResult collectMatches(PikeVM vm, Cache cache, String haystack, RegexTest test, int[] charToByteMap) {
         List<Span> spans = new ArrayList<>();
         int limit = test.matchLimit() != null ? test.matchLimit() : Integer.MAX_VALUE;
 
@@ -151,7 +238,7 @@ class PikeVMSuiteTest {
             int matchEnd = caps.end(0);
 
             // After a match ending at position P, if we find an empty match
-            // also at P, skip it and advance by 1 byte. This matches the upstream
+            // also at P, skip it and advance by 1 char. This matches the upstream
             // Rust regex crate's iteration semantics (Searcher::handle_overlapping_empty_match).
             if (matchStart == matchEnd && matchEnd == lastMatchEnd) {
                 searchStart = matchEnd + 1;
@@ -161,12 +248,10 @@ class PikeVMSuiteTest {
                 continue;
             }
 
-            spans.add(new Span(matchStart, matchEnd));
+            // Convert char offsets to byte offsets for comparison with upstream test data
+            spans.add(new Span(charToByte(charToByteMap, matchStart), charToByte(charToByteMap, matchEnd)));
             lastMatchEnd = matchEnd;
 
-            // Set next search start to the end of the match.
-            // For empty matches, the next call will find the same match at the same
-            // position, detect the overlap with lastMatchEnd, and advance by 1 byte.
             searchStart = matchEnd;
 
             if (searchStart > searchEnd) {
@@ -177,7 +262,7 @@ class PikeVMSuiteTest {
         return new TestResult.Matches(spans);
     }
 
-    private TestResult collectCaptures(PikeVM vm, NFA nfa, Cache cache, String haystack, RegexTest test) {
+    private TestResult collectCaptures(PikeVM vm, NFA nfa, Cache cache, String haystack, RegexTest test, int[] charToByteMap) {
         List<lol.ohai.regex.test.Captures> captures = new ArrayList<>();
         int limit = test.matchLimit() != null ? test.matchLimit() : Integer.MAX_VALUE;
 
@@ -206,12 +291,14 @@ class PikeVMSuiteTest {
                 continue;
             }
 
-            // Convert PikeVM Captures to test Captures
+            // Convert PikeVM Captures to test Captures, converting char offsets to byte offsets
             int groupCount = caps.groupCount();
             List<Optional<Span>> groups = new ArrayList<>();
             for (int g = 0; g < groupCount; g++) {
                 if (caps.isMatched(g)) {
-                    groups.add(Optional.of(new Span(caps.start(g), caps.end(g))));
+                    groups.add(Optional.of(new Span(
+                        charToByte(charToByteMap, caps.start(g)),
+                        charToByte(charToByteMap, caps.end(g)))));
                 } else {
                     groups.add(Optional.empty());
                 }
@@ -230,19 +317,27 @@ class PikeVMSuiteTest {
     }
 
     /**
-     * Returns the byte length of the UTF-8 codepoint starting at the given position.
-     * Returns 1 if at end of haystack or for invalid sequences.
+     * Returns true if the test's byte-offset bounds fall inside a multi-byte
+     * UTF-8 codepoint (i.e., at a continuation byte, not at a codepoint boundary).
      */
-    private static int utf8ByteLength(byte[] haystack, int pos) {
-        if (pos >= haystack.length) {
-            return 1;
+    private static boolean hasBoundsInsideCodepoint(RegexTest test) {
+        String haystack = test.haystack();
+        if (test.unescape()) {
+            haystack = unescapeHaystack(haystack);
         }
-        int b = haystack[pos] & 0xFF;
-        if (b < 0x80) return 1;
-        if (b < 0xC0) return 1; // continuation byte, shouldn't happen at start
-        if (b < 0xE0) return 2;
-        if (b < 0xF0) return 3;
-        return 4;
+        byte[] utf8 = haystack.getBytes(StandardCharsets.UTF_8);
+        int start = test.bounds().start();
+        int end = test.bounds().end();
+        return !isUtf8Boundary(utf8, start) || !isUtf8Boundary(utf8, end);
+    }
+
+    /**
+     * Returns true if the given byte offset is at a UTF-8 codepoint boundary.
+     */
+    private static boolean isUtf8Boundary(byte[] utf8, int offset) {
+        if (offset == 0 || offset >= utf8.length) return true;
+        // A continuation byte has the form 10xxxxxx (0x80-0xBF)
+        return (utf8[offset] & 0xC0) != 0x80;
     }
 
     /**

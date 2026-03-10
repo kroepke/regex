@@ -11,9 +11,9 @@ import java.util.List;
 /**
  * Thompson/Pike NFA simulation engine.
  *
- * <p>This implements the classic Pike VM algorithm: at each byte position,
- * maintain a set of active NFA states (threads). For each byte, advance all
- * threads through byte-consuming transitions, then compute epsilon closures
+ * <p>This implements the classic Pike VM algorithm: at each char position,
+ * maintain a set of active NFA states (threads). For each char, advance all
+ * threads through char-consuming transitions, then compute epsilon closures
  * for the next set of states.</p>
  *
  * <p>Thread-safe: PikeVM is immutable. {@link Cache} is per-search mutable state.</p>
@@ -63,9 +63,9 @@ public final class PikeVM {
      * Find the first match, returning a Captures with just the overall match span (group 0).
      * Returns null if no match is found.
      *
-     * <p>When the NFA is in UTF-8 mode and can match the empty string, this method
-     * filters out empty matches that split a UTF-8 codepoint, matching the upstream
-     * behavior of {@code empty::skip_splits_fwd}.</p>
+     * <p>When the NFA can match the empty string, this method filters out empty
+     * matches that split a surrogate pair, matching the upstream behavior of
+     * {@code empty::skip_splits_fwd}.</p>
      */
     public Captures search(Input input, Cache cache) {
         int[] slots = new int[2]; // only group 0
@@ -74,7 +74,7 @@ public final class PikeVM {
         if (result < 0) {
             return null;
         }
-        // Filter empty matches that split UTF-8 codepoints
+        // Filter empty matches that split surrogate pairs
         if (slots[0] == slots[1] && !input.isCharBoundary(slots[0])) {
             return skipSplitsFwd(input, cache, slots, 1);
         }
@@ -96,7 +96,7 @@ public final class PikeVM {
         if (result < 0) {
             return null;
         }
-        // Filter empty matches that split UTF-8 codepoints
+        // Filter empty matches that split surrogate pairs
         if (slots[0] == slots[1] && !input.isCharBoundary(slots[0])) {
             return skipSplitsFwd(input, cache, slots, groupCount);
         }
@@ -108,34 +108,41 @@ public final class PikeVM {
     }
 
     /**
-     * Skip empty matches that split UTF-8 codepoints by advancing the search start.
-     * For anchored searches, if the first match splits a codepoint, there is no valid match.
+     * Skip empty matches that split surrogate pairs by advancing the search start.
+     * For anchored searches, if the first match splits a pair, there is no valid match.
      * Mirrors the upstream {@code empty::skip_splits_fwd}.
      */
     private Captures skipSplitsFwd(Input input, Cache cache, int[] slots, int groupCount) {
         if (input.isAnchored()) {
-            return null; // anchored search at non-boundary -> no match
+            return null;
         }
         int matchOffset = slots[0];
-        int newStart = input.start();
-        while (!input.isCharBoundary(matchOffset)) {
-            newStart++;
-            if (newStart > input.end()) {
-                return null;
-            }
-            Input adjusted = input.withBounds(newStart, input.end(), input.isAnchored());
+        int newStart = matchOffset + 1;
+        // If splitting a surrogate pair, advance past the low surrogate
+        char[] haystack = input.haystack();
+        if (matchOffset > 0 && matchOffset < haystack.length
+                && Character.isHighSurrogate(haystack[matchOffset - 1])
+                && Character.isLowSurrogate(haystack[matchOffset])) {
+            newStart = matchOffset + 1;
+        }
+        while (newStart <= input.end()) {
+            Input adjusted = input.withBounds(newStart, input.end(), false);
             Arrays.fill(slots, -1);
             int result = searchSlots(adjusted, cache, slots);
             if (result < 0) {
                 return null;
             }
-            matchOffset = slots[0];
+            if (slots[0] == slots[1] && !input.isCharBoundary(slots[0])) {
+                newStart = slots[0] + 1;
+                continue;
+            }
+            Captures caps = new Captures(groupCount);
+            for (int i = 0; i < Math.min(slots.length, groupCount * 2); i++) {
+                caps.set(i, slots[i]);
+            }
+            return caps;
         }
-        Captures caps = new Captures(groupCount);
-        for (int i = 0; i < Math.min(slots.length, groupCount * 2); i++) {
-            caps.set(i, slots[i]);
-        }
-        return caps;
+        return null;
     }
 
     /**
@@ -143,14 +150,14 @@ public final class PikeVM {
      *
      * <p>The algorithm works as follows:</p>
      * <ol>
-     *   <li>For each byte position from start to end (inclusive):</li>
+     *   <li>For each char position from start to end (inclusive):</li>
      *   <li>  If not anchored and no match yet, add the anchored start state via epsilon closure</li>
-     *   <li>  For each active state, check byte-consuming transitions and add successors to next</li>
+     *   <li>  For each active state, check char-consuming transitions and add successors to next</li>
      *   <li>  When a Match state is encountered, record the match</li>
      *   <li>  Swap current and next, clear next</li>
      * </ol>
      *
-     * <p>Matches are "delayed by one byte" -- a Match state found in the current set
+     * <p>Matches are "delayed by one char" -- a Match state found in the current set
      * is reported during the nexts() step, not during epsilon closure. This mirrors
      * the upstream implementation and correctly handles look-behind assertions.</p>
      *
@@ -162,7 +169,7 @@ public final class PikeVM {
     private int searchSlots(Input input, Cache cache, int[] slots) {
         cache.setupSearch();
 
-        byte[] haystack = input.haystack();
+        char[] haystack = input.haystack();
         int start = input.start();
         int end = input.end();
         boolean anchored = input.isAnchored();
@@ -199,7 +206,7 @@ public final class PikeVM {
                 epsilonClosure(stack, scratchSlots, curr, haystack, at, startState);
             }
 
-            // Process byte-consuming transitions and detect matches.
+            // Process char-consuming transitions and detect matches.
             int matchedInStep = nexts(stack, cache, curr, next, haystack, at, end, slots);
             if (matchedInStep >= 0) {
                 matchPatternId = matchedInStep;
@@ -222,12 +229,12 @@ public final class PikeVM {
     }
 
     /**
-     * Process all current active states, advancing through byte-consuming transitions.
+     * Process all current active states, advancing through char-consuming transitions.
      *
      * <p>For each active state in priority order:</p>
      * <ul>
      *   <li>Match states: record the match and stop (leftmost-first)</li>
-     *   <li>ByteRange/Sparse/Dense: if the current byte matches, add successor via epsilon closure</li>
+     *   <li>CharRange/Sparse: if the current char matches, add successor via epsilon closure</li>
      *   <li>Other states: skip (should not be in the active set)</li>
      * </ul>
      *
@@ -238,7 +245,7 @@ public final class PikeVM {
             Cache cache,
             ActiveStates curr,
             ActiveStates next,
-            byte[] haystack,
+            char[] haystack,
             int at,
             int end,
             int[] slots
@@ -263,8 +270,8 @@ public final class PikeVM {
                 }
                 case State.CharRange cr -> {
                     if (at < end) {
-                        int ch = haystack[at] & 0xFFFF;
-                        if (ch >= cr.start() && ch <= cr.end()) {
+                        int c = haystack[at];
+                        if (c >= cr.start() && c <= cr.end()) {
                             curr.readSlots(sid, scratchSlots, 0);
                             epsilonClosure(stack, scratchSlots, next, haystack, at + 1, cr.next());
                         }
@@ -272,9 +279,9 @@ public final class PikeVM {
                 }
                 case State.Sparse sp -> {
                     if (at < end) {
-                        int ch = haystack[at] & 0xFFFF;
+                        int c = haystack[at];
                         for (Transition t : sp.transitions()) {
-                            if (ch >= t.start() && ch <= t.end()) {
+                            if (c >= t.start() && c <= t.end()) {
                                 curr.readSlots(sid, scratchSlots, 0);
                                 epsilonClosure(stack, scratchSlots, next, haystack, at + 1, t.next());
                                 break;
@@ -309,7 +316,7 @@ public final class PikeVM {
             List<FollowEpsilon> stack,
             int[] currSlots,
             ActiveStates next,
-            byte[] haystack,
+            char[] haystack,
             int at,
             int sid
     ) {
@@ -336,7 +343,7 @@ public final class PikeVM {
             List<FollowEpsilon> stack,
             int[] currSlots,
             ActiveStates next,
-            byte[] haystack,
+            char[] haystack,
             int at,
             int sid
     ) {
@@ -401,14 +408,14 @@ public final class PikeVM {
     }
 
     /**
-     * Check a look-around assertion at the given byte position in the haystack.
+     * Check a look-around assertion at the given char position in the haystack.
      *
      * @param look     the assertion kind
-     * @param haystack the UTF-8 encoded input bytes
-     * @param at       the current byte position
+     * @param haystack the char[] input
+     * @param at       the current char position
      * @return true if the assertion is satisfied
      */
-    private boolean checkLook(LookKind look, byte[] haystack, int at) {
+    private boolean checkLook(LookKind look, char[] haystack, int at) {
         int len = haystack.length;
         return switch (look) {
             case START_TEXT -> at == 0;
@@ -424,62 +431,51 @@ public final class PikeVM {
                     || (haystack[at] == '\n'
                         && (at == 0 || haystack[at - 1] != '\r'));
             case WORD_BOUNDARY_ASCII ->
-                    isWordByte(haystack, at) != isWordByte(haystack, at - 1);
+                    isWordChar(haystack, at) != isWordChar(haystack, at - 1);
             case WORD_BOUNDARY_ASCII_NEGATE ->
-                    isWordByte(haystack, at) == isWordByte(haystack, at - 1);
-            case WORD_START_ASCII -> !isWordByte(haystack, at - 1) && isWordByte(haystack, at);
-            case WORD_END_ASCII -> isWordByte(haystack, at - 1) && !isWordByte(haystack, at);
-            case WORD_START_HALF_ASCII -> !isWordByte(haystack, at - 1);
-            case WORD_END_HALF_ASCII -> !isWordByte(haystack, at);
+                    isWordChar(haystack, at) == isWordChar(haystack, at - 1);
+            case WORD_START_ASCII -> !isWordChar(haystack, at - 1) && isWordChar(haystack, at);
+            case WORD_END_ASCII -> isWordChar(haystack, at - 1) && !isWordChar(haystack, at);
+            case WORD_START_HALF_ASCII -> !isWordChar(haystack, at - 1);
+            case WORD_END_HALF_ASCII -> !isWordChar(haystack, at);
             case WORD_BOUNDARY_UNICODE -> {
-                boolean wordBefore = isWordCharRev(haystack, at);
-                boolean wordAfter = isWordCharFwd(haystack, at);
+                boolean wordBefore = at > 0 && isUnicodeWordChar(Character.codePointBefore(haystack, at));
+                boolean wordAfter = at < len && isUnicodeWordChar(Character.codePointAt(haystack, at));
                 yield wordBefore != wordAfter;
             }
             case WORD_BOUNDARY_UNICODE_NEGATE -> {
-                // Unlike ASCII, we need to ensure we're on a valid UTF-8 boundary.
-                // Inside invalid UTF-8 sequences, neither \b nor \B matches.
-                boolean validBefore = at == 0 || isValidUtf8BoundaryRev(haystack, at);
-                boolean validAfter = at == len || isValidUtf8BoundaryFwd(haystack, at);
-                if (!validBefore || !validAfter) {
-                    yield false;
-                }
-                boolean wordBefore = isWordCharRev(haystack, at);
-                boolean wordAfter = isWordCharFwd(haystack, at);
+                boolean wordBefore = at > 0 && isUnicodeWordChar(Character.codePointBefore(haystack, at));
+                boolean wordAfter = at < len && isUnicodeWordChar(Character.codePointAt(haystack, at));
                 yield wordBefore == wordAfter;
             }
-            case WORD_START_UNICODE -> !isWordCharRev(haystack, at) && isWordCharFwd(haystack, at);
-            case WORD_END_UNICODE -> isWordCharRev(haystack, at) && !isWordCharFwd(haystack, at);
-            case WORD_START_HALF_UNICODE -> {
-                // Must be on a valid UTF-8 boundary (before side)
-                if (at > 0 && !isValidUtf8BoundaryRev(haystack, at)) {
-                    yield false;
-                }
-                yield !isWordCharRev(haystack, at);
+            case WORD_START_UNICODE -> {
+                boolean wordBefore = at > 0 && isUnicodeWordChar(Character.codePointBefore(haystack, at));
+                boolean wordAfter = at < len && isUnicodeWordChar(Character.codePointAt(haystack, at));
+                yield !wordBefore && wordAfter;
             }
-            case WORD_END_HALF_UNICODE -> {
-                // Must be on a valid UTF-8 boundary (after side)
-                if (at < len && !isValidUtf8BoundaryFwd(haystack, at)) {
-                    yield false;
-                }
-                yield !isWordCharFwd(haystack, at);
+            case WORD_END_UNICODE -> {
+                boolean wordBefore = at > 0 && isUnicodeWordChar(Character.codePointBefore(haystack, at));
+                boolean wordAfter = at < len && isUnicodeWordChar(Character.codePointAt(haystack, at));
+                yield wordBefore && !wordAfter;
             }
+            case WORD_START_HALF_UNICODE -> !(at > 0 && isUnicodeWordChar(Character.codePointBefore(haystack, at)));
+            case WORD_END_HALF_UNICODE -> !(at < len && isUnicodeWordChar(Character.codePointAt(haystack, at)));
         };
     }
 
     /**
-     * Returns true if the byte at the given position is an ASCII word character: {@code [0-9A-Za-z_]}.
+     * Returns true if the char at the given position is an ASCII word character: {@code [0-9A-Za-z_]}.
      * Returns false if the position is out of bounds.
      */
-    private static boolean isWordByte(byte[] haystack, int pos) {
+    private static boolean isWordChar(char[] haystack, int pos) {
         if (pos < 0 || pos >= haystack.length) {
             return false;
         }
-        int b = haystack[pos] & 0xFF;
-        return (b >= 'a' && b <= 'z')
-                || (b >= 'A' && b <= 'Z')
-                || (b >= '0' && b <= '9')
-                || b == '_';
+        char c = haystack[pos];
+        return (c >= 'a' && c <= 'z')
+                || (c >= 'A' && c <= 'Z')
+                || (c >= '0' && c <= '9')
+                || c == '_';
     }
 
     /**
@@ -510,126 +506,5 @@ public final class PikeVM {
             }
         }
         return false;
-    }
-
-    /**
-     * Decode the UTF-8 codepoint starting at {@code at} (forward) and check if it's a word char.
-     * Returns false if at is out of bounds or the sequence is invalid.
-     */
-    private static boolean isWordCharFwd(byte[] haystack, int at) {
-        if (at < 0 || at >= haystack.length) {
-            return false;
-        }
-        int cp = decodeUtf8Fwd(haystack, at);
-        return cp >= 0 && isUnicodeWordChar(cp);
-    }
-
-    /**
-     * Decode the UTF-8 codepoint ending just before {@code at} (reverse) and check if it's a word char.
-     * Returns false if at is out of bounds or the sequence is invalid.
-     */
-    private static boolean isWordCharRev(byte[] haystack, int at) {
-        if (at <= 0 || at > haystack.length) {
-            return false;
-        }
-        int cp = decodeUtf8Rev(haystack, at);
-        return cp >= 0 && isUnicodeWordChar(cp);
-    }
-
-    /**
-     * Returns true if the UTF-8 sequence starting at {@code at} is valid (i.e., {@code at} is the
-     * start of a valid UTF-8 codepoint or at the end of the haystack).
-     */
-    private static boolean isValidUtf8BoundaryFwd(byte[] haystack, int at) {
-        if (at >= haystack.length) return true;
-        return decodeUtf8Fwd(haystack, at) >= 0;
-    }
-
-    /**
-     * Returns true if the UTF-8 sequence ending just before {@code at} is valid.
-     */
-    private static boolean isValidUtf8BoundaryRev(byte[] haystack, int at) {
-        if (at <= 0) return true;
-        return decodeUtf8Rev(haystack, at) >= 0;
-    }
-
-    /**
-     * Decode a single UTF-8 codepoint starting at position {@code at}.
-     * Returns the codepoint, or -1 if the sequence is invalid or incomplete.
-     */
-    private static int decodeUtf8Fwd(byte[] haystack, int at) {
-        if (at >= haystack.length) return -1;
-        int b0 = haystack[at] & 0xFF;
-        if (b0 < 0x80) {
-            return b0;
-        }
-        if (b0 < 0xC2 || b0 > 0xF4) return -1;
-        if (b0 < 0xE0) {
-            if (at + 1 >= haystack.length) return -1;
-            int b1 = haystack[at + 1] & 0xFF;
-            if ((b1 & 0xC0) != 0x80) return -1;
-            return ((b0 & 0x1F) << 6) | (b1 & 0x3F);
-        }
-        if (b0 < 0xF0) {
-            if (at + 2 >= haystack.length) return -1;
-            int b1 = haystack[at + 1] & 0xFF;
-            int b2 = haystack[at + 2] & 0xFF;
-            if ((b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80) return -1;
-            int cp = ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F);
-            if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) return -1;
-            return cp;
-        }
-        // 4-byte
-        if (at + 3 >= haystack.length) return -1;
-        int b1 = haystack[at + 1] & 0xFF;
-        int b2 = haystack[at + 2] & 0xFF;
-        int b3 = haystack[at + 3] & 0xFF;
-        if ((b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80 || (b3 & 0xC0) != 0x80) return -1;
-        int cp = ((b0 & 0x07) << 18) | ((b1 & 0x3F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F);
-        if (cp < 0x10000 || cp > 0x10FFFF) return -1;
-        return cp;
-    }
-
-    /**
-     * Decode a single UTF-8 codepoint ending just before position {@code at} (reverse decode).
-     * Returns the codepoint, or -1 if the sequence is invalid or incomplete.
-     */
-    private static int decodeUtf8Rev(byte[] haystack, int at) {
-        if (at <= 0) return -1;
-        int b = haystack[at - 1] & 0xFF;
-        if (b < 0x80) {
-            return b;
-        }
-        // Continuation byte: walk back to find the lead byte
-        if ((b & 0xC0) != 0x80) return -1;
-        int end = at;
-        int start = at - 1;
-        // Walk back up to 3 more bytes to find the lead byte
-        for (int i = 0; i < 3 && start > 0; i++) {
-            start--;
-            int lead = haystack[start] & 0xFF;
-            if ((lead & 0xC0) != 0x80) {
-                // Found potential lead byte; decode forward from here
-                int cp = decodeUtf8Fwd(haystack, start);
-                if (cp < 0) return -1;
-                // Verify the decoded sequence ends at 'at'
-                int expectedLen = utf8Len(lead);
-                if (start + expectedLen == end) {
-                    return cp;
-                }
-                return -1;
-            }
-        }
-        return -1;
-    }
-
-    /**
-     * Returns the expected UTF-8 sequence length from the lead byte.
-     */
-    private static int utf8Len(int leadByte) {
-        if (leadByte < 0x80) return 1;
-        if (leadByte < 0xE0) return 2;
-        if (leadByte < 0xF0) return 3;
-        return 4;
     }
 }

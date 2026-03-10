@@ -83,20 +83,20 @@ class PikeVMTest {
     void matchCapture() {
         var result = findCaptures("(a)(b)", "ab");
         assertNotNull(result);
-        assertEquals(0, charStart(result, 0)); // overall match
-        assertEquals(2, charEnd(result, 0));
-        assertEquals(0, charStart(result, 1)); // group 1: "a"
-        assertEquals(1, charEnd(result, 1));
-        assertEquals(1, charStart(result, 2)); // group 2: "b"
-        assertEquals(2, charEnd(result, 2));
+        assertEquals(0, result.start(0)); // overall match
+        assertEquals(2, result.end(0));
+        assertEquals(0, result.start(1)); // group 1: "a"
+        assertEquals(1, result.end(1));
+        assertEquals(1, result.start(2)); // group 2: "b"
+        assertEquals(2, result.end(2));
     }
 
     @Test
     void matchNamedCapture() {
         var result = findCaptures("(?P<x>a)(?P<y>b)", "ab");
         assertNotNull(result);
-        assertEquals(0, charStart(result, 1));
-        assertEquals(1, charEnd(result, 1));
+        assertEquals(0, result.start(1));
+        assertEquals(1, result.end(1));
     }
 
     @Test
@@ -172,7 +172,7 @@ class PikeVMTest {
 
     @Test
     void matchMultiByteUnicode() {
-        // Euro sign is U+20AC, 3 bytes in UTF-8
+        // Euro sign is U+20AC, 1 char in UTF-16
         assertMatch(".", "\u20AC", 0, 1);
     }
 
@@ -180,12 +180,12 @@ class PikeVMTest {
     void captureNestedGroups() {
         var result = findCaptures("(a(b)c)", "abc");
         assertNotNull(result);
-        assertEquals(0, charStart(result, 0));
-        assertEquals(3, charEnd(result, 0));
-        assertEquals(0, charStart(result, 1)); // group 1: "abc"
-        assertEquals(3, charEnd(result, 1));
-        assertEquals(1, charStart(result, 2)); // group 2: "b"
-        assertEquals(2, charEnd(result, 2));
+        assertEquals(0, result.start(0));
+        assertEquals(3, result.end(0));
+        assertEquals(0, result.start(1)); // group 1: "abc"
+        assertEquals(3, result.end(1));
+        assertEquals(1, result.start(2)); // group 2: "b"
+        assertEquals(2, result.end(2));
     }
 
     @Test
@@ -208,10 +208,8 @@ class PikeVMTest {
         Input input = Input.of(haystack);
         Captures caps = vm.search(input, cache);
         assertNotNull(caps, "Expected match for /" + pattern + "/ on \"" + haystack + "\"");
-        int start = input.toCharOffset(caps.start(0));
-        int end = input.toCharOffset(caps.end(0));
-        assertEquals(expectedStart, start, "start offset for /" + pattern + "/ on \"" + haystack + "\"");
-        assertEquals(expectedEnd, end, "end offset for /" + pattern + "/ on \"" + haystack + "\"");
+        assertEquals(expectedStart, caps.start(0), "start offset for /" + pattern + "/ on \"" + haystack + "\"");
+        assertEquals(expectedEnd, caps.end(0), "end offset for /" + pattern + "/ on \"" + haystack + "\"");
     }
 
     private void assertNoMatch(String pattern, String haystack) {
@@ -223,27 +221,13 @@ class PikeVMTest {
         assertNull(caps, "Expected no match for /" + pattern + "/ on \"" + haystack + "\"");
     }
 
-    private CapturesWithInput findCaptures(String pattern, String haystack) {
+    private Captures findCaptures(String pattern, String haystack) {
         NFA nfa = compileToNfa(pattern);
         PikeVM vm = new PikeVM(nfa);
         Cache cache = vm.createCache();
         Input input = Input.of(haystack);
-        Captures caps = vm.searchCaptures(input, cache);
-        if (caps == null) return null;
-        return new CapturesWithInput(caps, input);
+        return vm.searchCaptures(input, cache);
     }
-
-    /** Helper to get char-offset start for a group from a CapturesWithInput. */
-    private int charStart(CapturesWithInput cwi, int group) {
-        return cwi.input.toCharOffset(cwi.captures.start(group));
-    }
-
-    /** Helper to get char-offset end for a group from a CapturesWithInput. */
-    private int charEnd(CapturesWithInput cwi, int group) {
-        return cwi.input.toCharOffset(cwi.captures.end(group));
-    }
-
-    private record CapturesWithInput(Captures captures, Input input) {}
 
     private static NFA compileToNfa(String pattern) {
         try {
