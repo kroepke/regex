@@ -104,7 +104,7 @@ public final class Regex {
         if (caps == null) {
             return Optional.empty();
         }
-        return Optional.of(toMatch(text, input, caps, 0));
+        return Optional.of(toMatch(text, caps, 0));
     }
 
     /**
@@ -130,7 +130,7 @@ public final class Regex {
         if (caps == null) {
             return Optional.empty();
         }
-        return Optional.of(toCaptures(text, input, caps));
+        return Optional.of(toCaptures(text, caps));
     }
 
     /**
@@ -151,23 +151,21 @@ public final class Regex {
 
     // -- Internal helpers --
 
-    private Match toMatch(CharSequence text, Input input,
+    private Match toMatch(CharSequence text,
                           lol.ohai.regex.automata.util.Captures caps, int group) {
-        int byteStart = caps.start(group);
-        int byteEnd = caps.end(group);
-        int charStart = input.toCharOffset(byteStart);
-        int charEnd = input.toCharOffset(byteEnd);
-        return new Match(charStart, charEnd, text.subSequence(charStart, charEnd).toString());
+        int start = caps.start(group);
+        int end = caps.end(group);
+        return new Match(start, end, text.subSequence(start, end).toString());
     }
 
-    private Captures toCaptures(CharSequence text, Input input,
+    private Captures toCaptures(CharSequence text,
                                 lol.ohai.regex.automata.util.Captures caps) {
         int groupCount = caps.groupCount();
         List<Optional<Match>> groups = new ArrayList<>(groupCount);
         Match overall = null;
         for (int i = 0; i < groupCount; i++) {
             if (caps.isMatched(i)) {
-                Match m = toMatch(text, input, caps, i);
+                Match m = toMatch(text, caps, i);
                 groups.add(Optional.of(m));
                 if (i == 0) {
                     overall = m;
@@ -207,7 +205,7 @@ public final class Regex {
         }
 
         abstract lol.ohai.regex.automata.util.Captures doSearch(Input input, Cache cache);
-        abstract T toResult(CharSequence text, Input input, lol.ohai.regex.automata.util.Captures caps);
+        abstract T toResult(CharSequence text, lol.ohai.regex.automata.util.Captures caps);
 
         @Override
         public boolean hasNext() {
@@ -242,8 +240,8 @@ public final class Regex {
                     return;
                 }
 
-                int charStart = input.toCharOffset(caps.start(0));
-                int charEnd = input.toCharOffset(caps.end(0));
+                int charStart = caps.start(0);
+                int charEnd = caps.end(0);
 
                 // After a non-empty match ending at P, if we find an empty match also
                 // at P, skip it and advance by one codepoint. This matches the upstream
@@ -265,7 +263,7 @@ public final class Regex {
                 // starts from the same position. The duplicate detection above will then
                 // skip and advance if the same empty match is found again.
 
-                nextResult = toResult(text, input, caps);
+                nextResult = toResult(text, caps);
                 return;
             }
         }
@@ -280,8 +278,8 @@ public final class Regex {
         }
 
         @Override
-        Match toResult(CharSequence text, Input input, lol.ohai.regex.automata.util.Captures caps) {
-            return toMatch(text, input, caps, 0);
+        Match toResult(CharSequence text, lol.ohai.regex.automata.util.Captures caps) {
+            return toMatch(text, caps, 0);
         }
     }
 
@@ -294,8 +292,8 @@ public final class Regex {
         }
 
         @Override
-        Captures toResult(CharSequence text, Input input, lol.ohai.regex.automata.util.Captures caps) {
-            return toCaptures(text, input, caps);
+        Captures toResult(CharSequence text, lol.ohai.regex.automata.util.Captures caps) {
+            return toCaptures(text, caps);
         }
     }
 }
