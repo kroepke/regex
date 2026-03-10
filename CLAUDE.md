@@ -43,24 +43,26 @@ Pattern String
 
 ## Build & Test
 
-<!-- TODO: Update these commands once the build system is set up -->
-The project uses Maven. Update this section once the POM is configured.
+The project uses Maven with a wrapper script (`./mvnw`). Always use the wrapper for reproducible builds.
 
 ```bash
 # Build
-mvn compile
+./mvnw compile
 
 # Run all tests
-mvn test
+./mvnw test
 
 # Run a single test class
-mvn test -Dtest="SomeTest"
+./mvnw test -Dtest="SomeTest"
 
 # Run a single test method
-mvn test -Dtest="SomeTest#someMethod"
+./mvnw test -Dtest="SomeTest#someMethod"
+
+# Run tests in a single module
+./mvnw test -pl regex-syntax
 
 # Package
-mvn package
+./mvnw package
 ```
 
 ## Development Guidelines
