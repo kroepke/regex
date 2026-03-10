@@ -11,6 +11,7 @@ public final class Input {
     private final int start;
     private final int end;
     private final boolean anchored;
+    private String haystackStr;
 
     private Input(char[] haystack, int start, int end, boolean anchored) {
         this.haystack = haystack;
@@ -47,6 +48,14 @@ public final class Input {
     /** Returns the char[] haystack. */
     public char[] haystack() { return haystack; }
 
+    /** Returns a String view of the full haystack. Constructed lazily, cached. */
+    public String haystackStr() {
+        if (haystackStr == null) {
+            haystackStr = new String(haystack);
+        }
+        return haystackStr;
+    }
+
     /** Returns the char offset at which to start the search. */
     public int start() { return start; }
 
@@ -60,7 +69,9 @@ public final class Input {
      * Creates a new Input with the same haystack but different bounds and/or anchored flag.
      */
     public Input withBounds(int newStart, int newEnd, boolean newAnchored) {
-        return new Input(haystack, newStart, newEnd, newAnchored);
+        Input in = new Input(haystack, newStart, newEnd, newAnchored);
+        in.haystackStr = this.haystackStr; // share cached String
+        return in;
     }
 
     /**
