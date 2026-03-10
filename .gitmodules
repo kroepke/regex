@@ -1,3 +1,6 @@
 [submodule "upstream/regex"]
 	path = upstream/regex
 	url = https://github.com/rust-lang/regex
+[submodule "upstream/rebar"]
+	path = upstream/rebar
+	url = https://github.com/BurntSushi/rebar.git
