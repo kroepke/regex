@@ -1,6 +1,5 @@
 package lol.ohai.regex.automata.nfa.thompson;
 
-import lol.ohai.regex.syntax.hir.ClassBytes;
 import lol.ohai.regex.syntax.hir.ClassUnicode;
 import lol.ohai.regex.syntax.hir.Hir;
 
@@ -18,7 +17,7 @@ import java.util.List;
  * <p>The resulting NFA has two start states: one for anchored searches
  * (the pattern must match at the current position) and one for unanchored
  * searches (the pattern may match anywhere in the input). The unanchored
- * start state uses a loop that tries the pattern at every byte position.</p>
+ * start state uses a loop that tries the pattern at every char position.</p>
  */
 public final class Compiler {
 
@@ -70,13 +69,13 @@ public final class Compiler {
         // Anchored: captureStart
         builder.setStartAnchored(captureStart);
 
-        // Unanchored: a loop that tries the match at every byte position.
+        // Unanchored: a loop that tries the match at every char position.
         // BinaryUnion(captureStart, skipState)
-        // skipState = ByteRange(0x00-0xFF, -> loops back to BinaryUnion)
+        // skipState = CharRange(0x0000-0xFFFF, -> loops back to BinaryUnion)
         //
-        // The BinaryUnion gives priority to captureStart (alt1) over skipping (alt2),
-        // so the match at the earliest position wins.
-        int skipState = builder.add(new State.ByteRange(0x00, 0xFF, 0)); // placeholder next
+        // Covers all 16-bit char values including surrogates (0xD800-0xDFFF).
+        // The PikeVM loop advances by at++ through both halves of a surrogate pair.
+        int skipState = builder.add(new State.CharRange(0x0000, 0xFFFF, 0));
         int startUnanchored = builder.add(new State.BinaryUnion(captureStart, skipState));
         builder.patch(skipState, startUnanchored); // loop back
         builder.setStartUnanchored(startUnanchored);
@@ -93,7 +92,6 @@ public final class Compiler {
             case Hir.Empty e -> compileEmpty();
             case Hir.Literal l -> compileLiteral(l);
             case Hir.Class c -> compileClass(c);
-            case Hir.ClassB c -> compileClassBytes(c);
             case Hir.Look l -> compileLook(l);
             case Hir.Repetition r -> compileRepetition(r);
             case Hir.Capture c -> compileCapture(c);
@@ -103,22 +101,8 @@ public final class Compiler {
     }
 
     /**
-     * Empty: a single pass-through state. We use a Capture-like placeholder
-     * that will be patched to the next state. We use a BinaryUnion that
-     * just epsilon-transitions through. Actually, simplest: just add a
-     * ByteRange with a placeholder that gets patched. But a ByteRange
-     * would require matching a byte. Instead, we use a Union with a single
-     * alternative.
-     *
-     * Actually, the simplest approach: add a single-alt Union or a
-     * BinaryUnion(placeholder, placeholder) that acts as an epsilon.
-     * But the cleanest approach is to use a "hole" -- just a ByteRange(0,0,0)
-     * that acts as a placeholder. The caller will patch it.
-     *
-     * Following upstream's pattern: an empty match is compiled as an empty
-     * state that just gets patched through. We'll use a BinaryUnion where
-     * alt1 is 0 (placeholder) and alt2 won't be used. Actually let's just
-     * use a Union with one alternative that gets patched.
+     * Empty: a single pass-through state. We use a Union with a single
+     * alternative that gets patched to point to whatever comes next.
      */
     private ThompsonRef compileEmpty() {
         // Use a single-element Union as an epsilon/pass-through state.
@@ -128,19 +112,18 @@ public final class Compiler {
     }
 
     /**
-     * Literal: chain of ByteRange states, one per byte in the UTF-8 encoding.
+     * Literal: chain of CharRange states, one per char in the UTF-16 encoding.
      */
     private ThompsonRef compileLiteral(Hir.Literal lit) {
-        byte[] bytes = lit.bytes();
-        if (bytes.length == 0) {
+        char[] chars = lit.chars();
+        if (chars.length == 0) {
             return compileEmpty();
         }
 
-        int first = builder.add(new State.ByteRange(bytes[0] & 0xFF, bytes[0] & 0xFF, 0));
+        int first = builder.add(new State.CharRange(chars[0], chars[0], 0));
         int prev = first;
-        for (int i = 1; i < bytes.length; i++) {
-            int b = bytes[i] & 0xFF;
-            int cur = builder.add(new State.ByteRange(b, b, 0));
+        for (int i = 1; i < chars.length; i++) {
+            int cur = builder.add(new State.CharRange(chars[i], chars[i], 0));
             builder.patch(prev, cur);
             prev = cur;
         }
@@ -148,8 +131,8 @@ public final class Compiler {
     }
 
     /**
-     * Unicode character class: for each codepoint range, generate UTF-8 byte
-     * sequences using {@link Utf8Sequences}, then connect all alternatives
+     * Unicode character class: for each codepoint range, generate UTF-16 char-unit
+     * sequences using {@link Utf16Sequences}, then connect all alternatives
      * with a Union state.
      */
     private ThompsonRef compileClass(Hir.Class cls) {
@@ -162,10 +145,9 @@ public final class Compiler {
 
         List<ThompsonRef> alternatives = new ArrayList<>();
         for (ClassUnicode.ClassUnicodeRange range : ranges) {
-            Utf8Sequences seqs = new Utf8Sequences(range.start(), range.end());
-            while (seqs.hasNext()) {
-                Utf8Sequence seq = seqs.next();
-                ThompsonRef ref = compileUtf8Sequence(seq);
+            List<int[][]> seqs = Utf16Sequences.compile(range.start(), range.end());
+            for (int[][] seq : seqs) {
+                ThompsonRef ref = compileCharSequence(seq);
                 alternatives.add(ref);
             }
         }
@@ -178,49 +160,14 @@ public final class Compiler {
     }
 
     /**
-     * Byte-oriented character class: for each byte range, create a ByteRange state
-     * and connect all alternatives with a Union.
+     * Compiles a single char-unit range sequence (1-2 char ranges) into a chain
+     * of CharRange states.
      */
-    private ThompsonRef compileClassBytes(Hir.ClassB cls) {
-        List<ClassBytes.ClassBytesRange> ranges = cls.bytes().ranges();
-        if (ranges.isEmpty()) {
-            int id = builder.add(new State.Fail());
-            return new ThompsonRef(id, id);
-        }
-
-        if (ranges.size() == 1) {
-            ClassBytes.ClassBytesRange r = ranges.getFirst();
-            int id = builder.add(new State.ByteRange(r.start(), r.end(), 0));
-            return new ThompsonRef(id, id);
-        }
-
-        // Multiple byte ranges: create a Union
-        // Each alternative is a single ByteRange state.
-        // All their "end" states should be patched to the same target.
-        // We create a common "end" placeholder.
-        int endPlaceholder = builder.add(new State.Union(new int[]{0})); // epsilon placeholder
-
-        int[] alts = new int[ranges.size()];
-        for (int i = 0; i < ranges.size(); i++) {
-            ClassBytes.ClassBytesRange r = ranges.get(i);
-            int id = builder.add(new State.ByteRange(r.start(), r.end(), endPlaceholder));
-            alts[i] = id;
-        }
-
-        int union = builder.add(new State.Union(alts));
-        return new ThompsonRef(union, endPlaceholder);
-    }
-
-    /**
-     * Compiles a single UTF-8 byte sequence (1-4 byte ranges) into a chain
-     * of ByteRange states.
-     */
-    private ThompsonRef compileUtf8Sequence(Utf8Sequence seq) {
-        int[][] ranges = seq.ranges();
-        int first = builder.add(new State.ByteRange(ranges[0][0], ranges[0][1], 0));
+    private ThompsonRef compileCharSequence(int[][] seq) {
+        int first = builder.add(new State.CharRange(seq[0][0], seq[0][1], 0));
         int prev = first;
-        for (int i = 1; i < ranges.length; i++) {
-            int cur = builder.add(new State.ByteRange(ranges[i][0], ranges[i][1], 0));
+        for (int i = 1; i < seq.length; i++) {
+            int cur = builder.add(new State.CharRange(seq[i][0], seq[i][1], 0));
             builder.patch(prev, cur);
             prev = cur;
         }
@@ -513,7 +460,6 @@ public final class Compiler {
             case Hir.Empty e -> 0;
             case Hir.Literal l -> 0;
             case Hir.Class c -> 0;
-            case Hir.ClassB c -> 0;
             case Hir.Look l -> 0;
             case Hir.Repetition r -> countGroups(r.sub());
             case Hir.Capture c -> 1 + countGroups(c.sub());
@@ -530,9 +476,8 @@ public final class Compiler {
     private static boolean canMatchEmpty(Hir hir) {
         return switch (hir) {
             case Hir.Empty e -> true;
-            case Hir.Literal l -> l.bytes().length == 0;
+            case Hir.Literal l -> l.chars().length == 0;
             case Hir.Class c -> false; // class requires at least one codepoint
-            case Hir.ClassB c -> false; // byte class requires at least one byte
             case Hir.Look l -> true; // zero-width assertions match empty
             case Hir.Repetition r -> r.min() == 0 || canMatchEmpty(r.sub());
             case Hir.Capture c -> canMatchEmpty(c.sub());

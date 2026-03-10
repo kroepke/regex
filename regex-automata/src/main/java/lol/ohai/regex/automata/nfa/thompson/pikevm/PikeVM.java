@@ -261,34 +261,24 @@ public final class PikeVM {
                     }
                     matchedPattern = m.patternId();
                 }
-                case State.ByteRange br -> {
+                case State.CharRange cr -> {
                     if (at < end) {
-                        int b = haystack[at] & 0xFF;
-                        if (b >= br.start() && b <= br.end()) {
+                        int ch = haystack[at] & 0xFFFF;
+                        if (ch >= cr.start() && ch <= cr.end()) {
                             curr.readSlots(sid, scratchSlots, 0);
-                            epsilonClosure(stack, scratchSlots, next, haystack, at + 1, br.next());
+                            epsilonClosure(stack, scratchSlots, next, haystack, at + 1, cr.next());
                         }
                     }
                 }
                 case State.Sparse sp -> {
                     if (at < end) {
-                        int b = haystack[at] & 0xFF;
+                        int ch = haystack[at] & 0xFFFF;
                         for (Transition t : sp.transitions()) {
-                            if (b >= t.start() && b <= t.end()) {
+                            if (ch >= t.start() && ch <= t.end()) {
                                 curr.readSlots(sid, scratchSlots, 0);
                                 epsilonClosure(stack, scratchSlots, next, haystack, at + 1, t.next());
                                 break;
                             }
-                        }
-                    }
-                }
-                case State.Dense d -> {
-                    if (at < end) {
-                        int b = haystack[at] & 0xFF;
-                        int nextState = d.next()[b];
-                        if (nextState >= 0) {
-                            curr.readSlots(sid, scratchSlots, 0);
-                            epsilonClosure(stack, scratchSlots, next, haystack, at + 1, nextState);
                         }
                     }
                 }
@@ -366,15 +356,11 @@ public final class PikeVM {
                     next.copySlots(sid, currSlots, 0);
                     return;
                 }
-                case State.ByteRange br -> {
+                case State.CharRange cr -> {
                     next.copySlots(sid, currSlots, 0);
                     return;
                 }
                 case State.Sparse sp -> {
-                    next.copySlots(sid, currSlots, 0);
-                    return;
-                }
-                case State.Dense d -> {
                     next.copySlots(sid, currSlots, 0);
                     return;
                 }

@@ -14,8 +14,8 @@ class CompilerTest {
     void compileLiteral() {
         NFA nfa = compile("a");
         assertTrue(nfa.stateCount() > 0);
-        // Should have ByteRange for 'a', Capture states, Match
-        assertTrue(hasStateOfType(nfa, State.ByteRange.class));
+        // Should have CharRange for 'a', Capture states, Match
+        assertTrue(hasStateOfType(nfa, State.CharRange.class));
         assertTrue(hasStateOfType(nfa, State.Capture.class));
         assertTrue(hasStateOfType(nfa, State.Match.class));
     }
@@ -24,10 +24,10 @@ class CompilerTest {
     void compileMultiByteLiteral() {
         NFA nfa = compile("abc");
         assertTrue(nfa.stateCount() > 3);
-        // Should have 3 ByteRange states for 'a', 'b', 'c'
-        int byteRangeCount = countStatesOfType(nfa, State.ByteRange.class);
+        // Should have 3 CharRange states for 'a', 'b', 'c'
+        int charRangeCount = countStatesOfType(nfa, State.CharRange.class);
         // 3 for the literal + 1 for the unanchored skip loop
-        assertTrue(byteRangeCount >= 3, "Expected at least 3 ByteRange states, got " + byteRangeCount);
+        assertTrue(charRangeCount >= 3, "Expected at least 3 CharRange states, got " + charRangeCount);
     }
 
     @Test
@@ -86,7 +86,7 @@ class CompilerTest {
     void compileBounded() {
         NFA nfa = compile("a{2,4}");
         assertTrue(nfa.stateCount() > 4);
-        // Should have at least 2 ByteRange states for 'a' (required copies)
+        // Should have at least 2 CharRange states for 'a' (required copies)
         // plus optional copies
     }
 
@@ -94,9 +94,9 @@ class CompilerTest {
     void compileBoundedExact() {
         NFA nfa = compile("a{3}");
         // Should unroll 3 copies
-        int byteRangeCount = countStatesOfType(nfa, State.ByteRange.class);
+        int charRangeCount = countStatesOfType(nfa, State.CharRange.class);
         // 3 for the literal copies + 1 for unanchored skip
-        assertTrue(byteRangeCount >= 3, "Expected at least 3 ByteRange states, got " + byteRangeCount);
+        assertTrue(charRangeCount >= 3, "Expected at least 3 CharRange states, got " + charRangeCount);
     }
 
     @Test
@@ -110,23 +110,31 @@ class CompilerTest {
     void compileCharClass() {
         NFA nfa = compile("[a-z]");
         assertTrue(nfa.stateCount() > 0);
-        // Should have a ByteRange state covering 'a' to 'z'
+        // Should have a CharRange state covering 'a' to 'z'
         boolean hasRange = false;
         for (int i = 0; i < nfa.stateCount(); i++) {
-            if (nfa.state(i) instanceof State.ByteRange br
-                    && br.start() == 'a' && br.end() == 'z') {
+            if (nfa.state(i) instanceof State.CharRange cr
+                    && cr.start() == 'a' && cr.end() == 'z') {
                 hasRange = true;
                 break;
             }
         }
-        assertTrue(hasRange, "Expected a ByteRange [a-z]");
+        assertTrue(hasRange, "Expected a CharRange [a-z]");
     }
 
     @Test
     void compileMultiByteCharClass() {
-        // Euro sign U+20AC, 3-byte UTF-8: E2 82 AC
+        // Euro sign U+20AC — now a single BMP char, single CharRange
         NFA nfa = compile("[\\u20AC]");
-        assertTrue(nfa.stateCount() > 3, "Multi-byte char class should produce multiple ByteRange states");
+        boolean found = false;
+        for (int i = 0; i < nfa.stateCount(); i++) {
+            if (nfa.state(i) instanceof State.CharRange cr
+                    && cr.start() == 0x20AC && cr.end() == 0x20AC) {
+                found = true;
+                break;
+            }
+        }
+        assertTrue(found, "Expected CharRange for U+20AC");
     }
 
     @Test
@@ -175,9 +183,17 @@ class CompilerTest {
 
     @Test
     void compileUnicodeRange() {
-        // Cyrillic block: U+0400-U+04FF (2-byte UTF-8)
+        // Cyrillic block: U+0400-U+04FF — now a single BMP CharRange
         NFA nfa = compile("[\\u0400-\\u04FF]");
-        assertTrue(nfa.stateCount() > 2, "Cyrillic range should produce multi-byte states");
+        boolean found = false;
+        for (int i = 0; i < nfa.stateCount(); i++) {
+            if (nfa.state(i) instanceof State.CharRange cr
+                    && cr.start() == 0x0400 && cr.end() == 0x04FF) {
+                found = true;
+                break;
+            }
+        }
+        assertTrue(found, "Expected CharRange [U+0400, U+04FF]");
     }
 
     @Test
@@ -186,13 +202,13 @@ class CompilerTest {
         NFA nfa = compile("[x]");
         boolean found = false;
         for (int i = 0; i < nfa.stateCount(); i++) {
-            if (nfa.state(i) instanceof State.ByteRange br
-                    && br.start() == 'x' && br.end() == 'x') {
+            if (nfa.state(i) instanceof State.CharRange cr
+                    && cr.start() == 'x' && cr.end() == 'x') {
                 found = true;
                 break;
             }
         }
-        assertTrue(found, "Expected ByteRange for 'x'");
+        assertTrue(found, "Expected CharRange for 'x'");
     }
 
     // --- Helpers ---
