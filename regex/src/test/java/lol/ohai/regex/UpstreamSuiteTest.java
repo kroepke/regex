@@ -59,6 +59,11 @@ class UpstreamSuiteTest {
             return CompiledRegex.skip();
         }
 
+        // Skip regex-lite tests — they expect ASCII-only Perl classes even with unicode=true
+        if ("regex-lite".equals(test.groupName())) {
+            return CompiledRegex.skip();
+        }
+
         String pattern = test.regexes().getFirst();
 
         try {

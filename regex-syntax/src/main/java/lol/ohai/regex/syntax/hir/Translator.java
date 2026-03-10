@@ -207,11 +207,12 @@ public final class Translator {
             ClassUnicode cls = flags.unicode
                     ? perlClassUnicode(cp.kind())
                     : perlClassAscii(cp.kind());
-            if (cp.negated()) {
-                cls.negate();
-            }
+            // Case fold before negation: (?i)\D must exclude all case variants of \d
             if (flags.caseInsensitive) {
                 cls.caseFoldSimple();
+            }
+            if (cp.negated()) {
+                cls.negate();
             }
             return new Hir.Class(cls);
         }
@@ -228,11 +229,12 @@ public final class Translator {
 
         private Hir translateClassBracketed(Ast.ClassBracketed cb) throws Error {
             ClassUnicode cls = translateClassSet(cb.kind());
-            if (cb.negated()) {
-                cls.negate();
-            }
+            // Case fold before negation: (?i)[^x] must exclude both 'x' and 'X'
             if (flags.caseInsensitive) {
                 cls.caseFoldSimple();
+            }
+            if (cb.negated()) {
+                cls.negate();
             }
             return new Hir.Class(cls);
         }
@@ -271,6 +273,9 @@ public final class Translator {
                     ClassUnicode cls = flags.unicode
                             ? perlClassUnicode(perl.kind())
                             : perlClassAscii(perl.kind());
+                    if (flags.caseInsensitive) {
+                        cls.caseFoldSimple();
+                    }
                     if (perl.negated()) {
                         cls.negate();
                     }
@@ -278,6 +283,9 @@ public final class Translator {
                 }
                 case ClassSetItem.Bracketed bracketed -> {
                     ClassUnicode cls = translateClassSet(bracketed.kind());
+                    if (flags.caseInsensitive) {
+                        cls.caseFoldSimple();
+                    }
                     if (bracketed.negated()) {
                         cls.negate();
                     }

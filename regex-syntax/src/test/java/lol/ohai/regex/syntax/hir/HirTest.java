@@ -274,9 +274,17 @@ class HirTest {
     }
 
     @Test
-    void translatePerlDigitUnicodeMode() {
-        // In Unicode mode, Perl classes should throw an error (not yet implemented)
-        assertThrows(Error.class, () -> t("\\d"));
+    void translatePerlDigitUnicodeMode() throws Exception {
+        // Unicode mode is the default — \d should produce a Unicode digit class
+        Hir hir = t("\\d");
+        assertInstanceOf(Hir.Class.class, hir);
+        Hir.Class cls = (Hir.Class) hir;
+        // Unicode \d includes many ranges beyond ASCII 0-9
+        List<ClassUnicodeRange> ranges = cls.unicode().ranges();
+        assertTrue(ranges.size() > 1, "Unicode \\d should have multiple ranges");
+        // First range should include ASCII digits
+        assertEquals('0', ranges.get(0).start());
+        assertEquals('9', ranges.get(0).end());
     }
 
     // --- Character classes ---
