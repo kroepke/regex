@@ -11,29 +11,21 @@ import lol.ohai.regex.syntax.hir.LookKind;
 public sealed interface State {
 
     /**
-     * Matches a single byte in range [start, end] inclusive, then transitions to next.
+     * Matches a single char unit in range [start, end] inclusive, then transitions to next.
      *
-     * @param start the inclusive lower bound of the byte range
-     * @param end   the inclusive upper bound of the byte range
+     * @param start the inclusive lower bound of the char range
+     * @param end   the inclusive upper bound of the char range
      * @param next  the target state ID on a successful match
      */
-    record ByteRange(int start, int end, int next) implements State {}
+    record CharRange(int start, int end, int next) implements State {}
 
     /**
-     * Multiple byte range transitions from this state.
+     * Multiple char range transitions from this state.
      * Each transition is tried in order; the first matching one is taken.
      *
      * @param transitions the ordered list of transitions
      */
     record Sparse(Transition[] transitions) implements State {}
-
-    /**
-     * Dense byte transition table with 256 entries.
-     * Index by byte value to get the next state ID; -1 means no transition.
-     *
-     * @param next the transition table, indexed by byte value
-     */
-    record Dense(int[] next) implements State {}
 
     /**
      * A zero-width assertion. If the assertion is satisfied at the current

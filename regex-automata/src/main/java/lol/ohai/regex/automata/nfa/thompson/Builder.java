@@ -37,7 +37,7 @@ public final class Builder {
      * <p>This is used during compilation to wire up forward references.
      * The patching behavior depends on the state type:</p>
      * <ul>
-     *   <li>{@link State.ByteRange} — replaces the {@code next} field</li>
+     *   <li>{@link State.CharRange} — replaces the {@code next} field</li>
      *   <li>{@link State.Look} — replaces the {@code next} field</li>
      *   <li>{@link State.Capture} — replaces the {@code next} field</li>
      *   <li>{@link State.Union} — sets the last alternate to {@code target}</li>
@@ -51,7 +51,7 @@ public final class Builder {
     public void patch(int stateId, int target) {
         State s = states.get(stateId);
         State patched = switch (s) {
-            case State.ByteRange r -> new State.ByteRange(r.start(), r.end(), target);
+            case State.CharRange r -> new State.CharRange(r.start(), r.end(), target);
             case State.Look l -> new State.Look(l.look(), target);
             case State.Capture c -> new State.Capture(target, c.groupIndex(), c.slotIndex());
             case State.Union u -> {
@@ -69,7 +69,7 @@ public final class Builder {
                 }
                 yield new State.Sparse(ts);
             }
-            default -> s; // Match, Fail, Dense — no-op
+            default -> s; // Match, Fail — no-op
         };
         states.set(stateId, patched);
     }

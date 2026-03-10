@@ -12,10 +12,10 @@ class BuilderTest {
 
     @Test
     void buildSimpleNfa() {
-        // Build: start -> ByteRange('a') -> Match(0)
+        // Build: start -> CharRange('a') -> Match(0)
         var b = new Builder();
         int match = b.add(new State.Match(0));
-        int range = b.add(new State.ByteRange('a', 'a', match));
+        int range = b.add(new State.CharRange('a', 'a', match));
         b.setStartAnchored(range);
         b.setStartUnanchored(range);
         NFA nfa = b.build();
@@ -23,10 +23,10 @@ class BuilderTest {
         assertEquals(2, nfa.stateCount());
         assertEquals(range, nfa.startAnchored());
         assertEquals(range, nfa.startUnanchored());
-        assertInstanceOf(State.ByteRange.class, nfa.state(range));
+        assertInstanceOf(State.CharRange.class, nfa.state(range));
         assertInstanceOf(State.Match.class, nfa.state(match));
 
-        State.ByteRange br = (State.ByteRange) nfa.state(range);
+        State.CharRange br = (State.CharRange) nfa.state(range);
         assertEquals('a', br.start());
         assertEquals('a', br.end());
         assertEquals(match, br.next());
@@ -37,8 +37,8 @@ class BuilderTest {
         // Build alternation: start -> Union([branch_a, branch_b]) -> Match
         var b = new Builder();
         int match = b.add(new State.Match(0));
-        int branchA = b.add(new State.ByteRange('a', 'a', match));
-        int branchB = b.add(new State.ByteRange('b', 'b', match));
+        int branchA = b.add(new State.CharRange('a', 'a', match));
+        int branchB = b.add(new State.CharRange('b', 'b', match));
         int union = b.add(new State.Union(new int[]{branchA, branchB}));
         b.setStartAnchored(union);
         b.setStartUnanchored(union);
@@ -53,11 +53,11 @@ class BuilderTest {
 
     @Test
     void buildWithCapture() {
-        // Build: CaptureStart -> ByteRange('x') -> CaptureEnd -> Match
+        // Build: CaptureStart -> CharRange('x') -> CaptureEnd -> Match
         var b = new Builder();
         int match = b.add(new State.Match(0));
         int capEnd = b.add(new State.Capture(match, 0, 1));
-        int range = b.add(new State.ByteRange('x', 'x', capEnd));
+        int range = b.add(new State.CharRange('x', 'x', capEnd));
         int capStart = b.add(new State.Capture(range, 0, 0));
         b.setStartAnchored(capStart);
         b.setStartUnanchored(capStart);
@@ -72,21 +72,21 @@ class BuilderTest {
     }
 
     @Test
-    void patchByteRange() {
+    void patchCharRange() {
         var b = new Builder();
-        int placeholder = b.add(new State.ByteRange('a', 'a', -1));
+        int placeholder = b.add(new State.CharRange('a', 'a', -1));
         int match = b.add(new State.Match(0));
         b.patch(placeholder, match);
         NFA nfa = b.build();
 
-        State.ByteRange br = (State.ByteRange) nfa.state(placeholder);
+        State.CharRange br = (State.CharRange) nfa.state(placeholder);
         assertEquals(match, br.next());
     }
 
     @Test
     void patchUnion() {
         var b = new Builder();
-        int branchA = b.add(new State.ByteRange('a', 'a', -1));
+        int branchA = b.add(new State.CharRange('a', 'a', -1));
         int union = b.add(new State.Union(new int[]{branchA, -1}));
         int match = b.add(new State.Match(0));
         b.patch(union, match);
@@ -116,8 +116,8 @@ class BuilderTest {
     void buildWithBinaryUnion() {
         var b = new Builder();
         int match = b.add(new State.Match(0));
-        int branchA = b.add(new State.ByteRange('a', 'a', match));
-        int branchB = b.add(new State.ByteRange('b', 'b', match));
+        int branchA = b.add(new State.CharRange('a', 'a', match));
+        int branchB = b.add(new State.CharRange('b', 'b', match));
         int union = b.add(new State.BinaryUnion(branchA, branchB));
         b.setStartAnchored(union);
         b.setStartUnanchored(union);
