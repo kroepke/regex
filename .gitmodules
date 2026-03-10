@@ -1,0 +1,3 @@
+[submodule "upstream/regex"]
+	path = upstream/regex
+	url = https://github.com/rust-lang/regex
