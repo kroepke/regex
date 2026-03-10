@@ -312,82 +312,41 @@ public final class Compiler {
 
     /**
      * Compiles a* (greedy) or a*? (lazy).
+     *
+     * <p>When the sub-expression can match the empty string, we compile x* as
+     * (x+)? instead. This is necessary for correct leftmost-first match semantics.
+     * Without this transformation, the NFA's epsilon closure computes an incorrect
+     * preference order. See: https://github.com/rust-lang/regex/issues/779
      */
     private ThompsonRef compileStar(Hir sub, boolean greedy) throws BuildError {
-        ThompsonRef body = compileNode(sub);
+        // When the sub-expression can match the empty string, compile x* as (x+)?
+        // to preserve correct leftmost-first preference ordering.
+        if (canMatchEmpty(sub)) {
+            ThompsonRef plus = compilePlus(sub, greedy);
+            return compileQuestion(new Hir.Empty(), greedy, plus);
+        }
 
-        // Create the union/split state
-        // Greedy: try body first, then skip (empty)
-        // Lazy: try skip first, then body
+        ThompsonRef body = compileNode(sub);
+        return compileStarClean(sub, greedy, body);
+    }
+
+    /**
+     * Like compileQuestion but wraps an already-compiled ThompsonRef in a ? construct.
+     */
+    private ThompsonRef compileQuestion(Hir unused, boolean greedy, ThompsonRef body) {
+        int endEpsilon = builder.add(new State.Union(new int[]{0})); // exit placeholder
+
+        // Wire body end -> endEpsilon
+        builder.patch(body.end(), endEpsilon);
+
         int splitId;
         if (greedy) {
-            splitId = builder.add(new State.BinaryUnion(body.start(), 0)); // alt2 = placeholder (empty path)
+            splitId = builder.add(new State.BinaryUnion(body.start(), endEpsilon));
         } else {
-            splitId = builder.add(new State.BinaryUnion(0, body.start())); // alt1 = placeholder (empty path)
+            splitId = builder.add(new State.BinaryUnion(endEpsilon, body.start()));
         }
 
-        // Wire body end back to split (the loop)
-        builder.patch(body.end(), splitId);
-
-        // The "end" of this fragment is the split state itself -- specifically,
-        // the empty/skip alternative. For BinaryUnion:
-        //   - greedy: alt2 is the exit (will be patched)
-        //   - lazy: alt1 is the exit (will be patched)
-        // But patch() on BinaryUnion patches alt2 for BinaryUnion. So for lazy,
-        // we need to handle this differently.
-        //
-        // Actually, looking at Builder.patch(): it sets alt1 for BinaryUnion.
-        // Wait no -- let me re-read: "case State.BinaryUnion bu -> new State.BinaryUnion(bu.alt1(), target)"
-        // So patch replaces alt2! That means for greedy, alt2 is the placeholder exit -- perfect.
-        // For lazy, alt1 should be the exit. But patch replaces alt2.
-        //
-        // Solution for lazy: we need to use the split state differently.
-        // For lazy: BinaryUnion(exitPlaceholder, body.start())
-        //   - patch on the BinaryUnion will set alt2 -- but alt2 is body.start(), not what we want.
-        //
-        // Hmm, Builder.patch() for BinaryUnion does: new BinaryUnion(bu.alt1(), target)
-        // That replaces alt2 with target. So for lazy, we want alt1=exit placeholder.
-        // We can't patch alt1 via Builder.patch().
-        //
-        // Alternative approach: use an intermediate epsilon state for the exit path.
-        // Create an epsilon (Union with one alt) as the exit placeholder, and wire
-        // the split to it.
-
-        // Let's use a simpler approach with an explicit empty/epsilon end state.
-        // This avoids the asymmetry problem with BinaryUnion patching.
-
-        // Re-do: create an end placeholder epsilon state
-        int endEpsilon = builder.add(new State.Union(new int[]{0}));
-
-        if (greedy) {
-            // Replace the split: try body first, then exit
-            builder.patch(splitId, endEpsilon); // patches alt2 to endEpsilon
-        } else {
-            // For lazy: we need split = BinaryUnion(endEpsilon, body.start())
-            // But we already created the split. Let's just rebuild.
-            // Actually we can't easily replace. Let's create it correctly from the start.
-            // We need to redo the approach.
-        }
-
-        // Let me redo this more cleanly. The issue is that BinaryUnion.patch()
-        // only patches alt2. Let's handle greedy and lazy separately.
-
-        // Actually let me re-examine. For star:
-        // We need: split -> body -> split (loop), and split -> end (exit)
-        //
-        // Greedy: split.alt1 = body.start, split.alt2 = end (exit)
-        //   patch(split, end) sets alt2 = end. Good.
-        //
-        // Lazy: split.alt1 = end (exit), split.alt2 = body.start
-        //   We want to patch alt1 later. But patch() patches alt2.
-        //   So we can't use the split as the "end" reference.
-        //   Instead, use a separate epsilon for the exit.
-
-        // Clean approach: always use an explicit epsilon end state.
-        // Already created endEpsilon above. But we created the wrong split for lazy.
-
-        // Let me just redo this whole method cleanly:
-        return compileStarClean(sub, greedy, body);
+        return new ThompsonRef(splitId, endEpsilon);
     }
 
     private ThompsonRef compileStarClean(Hir sub, boolean greedy, ThompsonRef body) {
@@ -560,6 +519,25 @@ public final class Compiler {
             case Hir.Capture c -> 1 + countGroups(c.sub());
             case Hir.Concat c -> c.subs().stream().mapToInt(Compiler::countGroups).sum();
             case Hir.Alternation a -> a.subs().stream().mapToInt(Compiler::countGroups).sum();
+        };
+    }
+
+    /**
+     * Returns true if the given HIR can match the empty string.
+     * This is used by the compiler to decide whether x* should be compiled as
+     * (x+)? to preserve correct leftmost-first preference ordering.
+     */
+    private static boolean canMatchEmpty(Hir hir) {
+        return switch (hir) {
+            case Hir.Empty e -> true;
+            case Hir.Literal l -> l.bytes().length == 0;
+            case Hir.Class c -> false; // class requires at least one codepoint
+            case Hir.ClassB c -> false; // byte class requires at least one byte
+            case Hir.Look l -> true; // zero-width assertions match empty
+            case Hir.Repetition r -> r.min() == 0 || canMatchEmpty(r.sub());
+            case Hir.Capture c -> canMatchEmpty(c.sub());
+            case Hir.Concat c -> c.subs().stream().allMatch(Compiler::canMatchEmpty);
+            case Hir.Alternation a -> a.subs().stream().anyMatch(Compiler::canMatchEmpty);
         };
     }
 

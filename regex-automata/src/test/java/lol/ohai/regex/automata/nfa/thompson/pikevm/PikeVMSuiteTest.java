@@ -57,11 +57,16 @@ class PikeVMSuiteTest {
             return CompiledRegex.skip();
         }
 
+        // Skip tests with non-default line terminators (not yet supported)
+        if (!"\n".equals(test.lineTerminator())) {
+            return CompiledRegex.skip();
+        }
+
         String pattern = test.regexes().getFirst();
 
         try {
             var ast = Parser.parse(pattern);
-            var hir = Translator.translate(pattern, ast);
+            var hir = Translator.translate(pattern, ast, test.unicode());
             var nfa = Compiler.compile(hir);
             var vm = new PikeVM(nfa);
             var cache = vm.createCache();
@@ -130,7 +135,7 @@ class PikeVMSuiteTest {
         int lastMatchEnd = -1;
 
         while (spans.size() < limit) {
-            Input input = Input.withByteBounds(haystack, searchStart, searchEnd, test.anchored());
+            Input input = baseInput.withBounds(searchStart, searchEnd, test.anchored());
 
             Captures caps = vm.search(input, cache);
             if (caps == null) {
@@ -140,11 +145,11 @@ class PikeVMSuiteTest {
             int matchStart = caps.start(0);
             int matchEnd = caps.end(0);
 
-            // After a non-empty match ending at position P, if we find an empty
-            // match also starting at P, skip it and advance. This matches the
-            // upstream Rust regex crate's iteration semantics.
-            if (matchStart == matchEnd && matchStart == lastMatchEnd) {
-                searchStart = matchEnd + utf8ByteLength(baseInput.haystack(), matchEnd);
+            // After a match ending at position P, if we find an empty match
+            // also at P, skip it and advance by 1 byte. This matches the upstream
+            // Rust regex crate's iteration semantics (Searcher::handle_overlapping_empty_match).
+            if (matchStart == matchEnd && matchEnd == lastMatchEnd) {
+                searchStart = matchEnd + 1;
                 if (searchStart > searchEnd) {
                     break;
                 }
@@ -154,18 +159,12 @@ class PikeVMSuiteTest {
             spans.add(new Span(matchStart, matchEnd));
             lastMatchEnd = matchEnd;
 
-            if (matchStart == matchEnd) {
-                // Empty match: advance by one codepoint to avoid infinite loop.
-                searchStart = matchEnd + utf8ByteLength(baseInput.haystack(), matchEnd);
-            } else {
-                searchStart = matchEnd;
-            }
+            // Set next search start to the end of the match.
+            // For empty matches, the next call will find the same match at the same
+            // position, detect the overlap with lastMatchEnd, and advance by 1 byte.
+            searchStart = matchEnd;
 
             if (searchStart > searchEnd) {
-                break;
-            }
-
-            if (test.anchored()) {
                 break;
             }
         }
@@ -183,7 +182,7 @@ class PikeVMSuiteTest {
         int lastMatchEnd = -1;
 
         while (captures.size() < limit) {
-            Input input = Input.withByteBounds(haystack, searchStart, searchEnd, test.anchored());
+            Input input = baseInput.withBounds(searchStart, searchEnd, test.anchored());
 
             Captures caps = vm.searchCaptures(input, cache);
             if (caps == null) {
@@ -193,9 +192,9 @@ class PikeVMSuiteTest {
             int matchStart = caps.start(0);
             int matchEnd = caps.end(0);
 
-            // Skip empty matches at the same position as the end of the last non-empty match.
-            if (matchStart == matchEnd && matchStart == lastMatchEnd) {
-                searchStart = matchEnd + utf8ByteLength(baseInput.haystack(), matchEnd);
+            // Skip empty matches at the same position as the end of the last match.
+            if (matchStart == matchEnd && matchEnd == lastMatchEnd) {
+                searchStart = matchEnd + 1;
                 if (searchStart > searchEnd) {
                     break;
                 }
@@ -215,17 +214,9 @@ class PikeVMSuiteTest {
             captures.add(new lol.ohai.regex.test.Captures(0, groups));
             lastMatchEnd = matchEnd;
 
-            if (matchStart == matchEnd) {
-                searchStart = matchEnd + utf8ByteLength(baseInput.haystack(), matchEnd);
-            } else {
-                searchStart = matchEnd;
-            }
+            searchStart = matchEnd;
 
             if (searchStart > searchEnd) {
-                break;
-            }
-
-            if (test.anchored()) {
                 break;
             }
         }

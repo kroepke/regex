@@ -2,6 +2,7 @@ package lol.ohai.regex.syntax.hir;
 
 import lol.ohai.regex.syntax.ast.*;
 import lol.ohai.regex.syntax.hir.ClassUnicode.ClassUnicodeRange;
+import lol.ohai.regex.syntax.hir.unicode.PerlClassTables;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -31,6 +32,21 @@ public final class Translator {
         return new TranslatorImpl(pattern, new Flags()).translate(ast);
     }
 
+    /**
+     * Translate the given AST into an HIR with specific initial flags.
+     *
+     * @param pattern the original pattern string (used for error reporting)
+     * @param ast the parsed AST
+     * @param unicode whether to enable Unicode mode
+     * @return the HIR
+     * @throws Error if the AST cannot be translated
+     */
+    public static Hir translate(String pattern, Ast ast, boolean unicode) throws Error {
+        Flags flags = new Flags();
+        flags.unicode = unicode;
+        return new TranslatorImpl(pattern, flags).translate(ast);
+    }
+
     // --- Internal flag state ---
 
     /**
@@ -42,6 +58,7 @@ public final class Translator {
         boolean dotMatchesNewLine;
         boolean swapGreed;
         boolean unicode = true; // unicode mode is on by default
+        boolean crlf;
 
         Flags() {}
 
@@ -52,6 +69,7 @@ public final class Translator {
             f.dotMatchesNewLine = dotMatchesNewLine;
             f.swapGreed = swapGreed;
             f.unicode = unicode;
+            f.crlf = crlf;
             return f;
         }
 
@@ -71,7 +89,8 @@ public final class Translator {
                             case DOT_MATCHES_NEW_LINE -> dotMatchesNewLine = value;
                             case SWAP_GREED -> swapGreed = value;
                             case UNICODE -> unicode = value;
-                            default -> {} // CRLF, IGNORE_WHITESPACE handled at parse level
+                            case CRLF -> crlf = value;
+                            default -> {} // IGNORE_WHITESPACE handled at parse level
                         }
                     }
                 }
@@ -131,6 +150,13 @@ public final class Translator {
                 cls = ClassUnicode.of(
                         new ClassUnicodeRange(ClassUnicode.MIN_CODEPOINT, ClassUnicode.MAX_CODEPOINT)
                 );
+            } else if (flags.crlf) {
+                // All codepoints except \r and \n
+                cls = ClassUnicode.of(
+                        new ClassUnicodeRange(0x00, 0x09),
+                        new ClassUnicodeRange(0x0B, 0x0C),
+                        new ClassUnicodeRange(0x0E, ClassUnicode.MAX_CODEPOINT)
+                );
             } else {
                 // All codepoints except \n
                 cls = ClassUnicode.of(
@@ -145,8 +171,12 @@ public final class Translator {
 
         private Hir translateAssertion(Ast.Assertion a) throws Error {
             LookKind kind = switch (a.kind()) {
-                case START_LINE -> flags.multiLine ? LookKind.START_LINE : LookKind.START_TEXT;
-                case END_LINE -> flags.multiLine ? LookKind.END_LINE : LookKind.END_TEXT;
+                case START_LINE -> flags.multiLine
+                        ? (flags.crlf ? LookKind.START_LINE_CRLF : LookKind.START_LINE)
+                        : LookKind.START_TEXT;
+                case END_LINE -> flags.multiLine
+                        ? (flags.crlf ? LookKind.END_LINE_CRLF : LookKind.END_LINE)
+                        : LookKind.END_TEXT;
                 case START_TEXT -> LookKind.START_TEXT;
                 case END_TEXT -> LookKind.END_TEXT;
                 case WORD_BOUNDARY -> flags.unicode
@@ -155,12 +185,18 @@ public final class Translator {
                 case NOT_WORD_BOUNDARY -> flags.unicode
                         ? LookKind.WORD_BOUNDARY_UNICODE_NEGATE
                         : LookKind.WORD_BOUNDARY_ASCII_NEGATE;
-                case WORD_BOUNDARY_START, WORD_BOUNDARY_START_ANGLE ->
-                        LookKind.WORD_START_UNICODE;
-                case WORD_BOUNDARY_END, WORD_BOUNDARY_END_ANGLE ->
-                        LookKind.WORD_END_UNICODE;
-                case WORD_BOUNDARY_START_HALF -> LookKind.WORD_START_HALF_UNICODE;
-                case WORD_BOUNDARY_END_HALF -> LookKind.WORD_END_HALF_UNICODE;
+                case WORD_BOUNDARY_START, WORD_BOUNDARY_START_ANGLE -> flags.unicode
+                        ? LookKind.WORD_START_UNICODE
+                        : LookKind.WORD_START_ASCII;
+                case WORD_BOUNDARY_END, WORD_BOUNDARY_END_ANGLE -> flags.unicode
+                        ? LookKind.WORD_END_UNICODE
+                        : LookKind.WORD_END_ASCII;
+                case WORD_BOUNDARY_START_HALF -> flags.unicode
+                        ? LookKind.WORD_START_HALF_UNICODE
+                        : LookKind.WORD_START_HALF_ASCII;
+                case WORD_BOUNDARY_END_HALF -> flags.unicode
+                        ? LookKind.WORD_END_HALF_UNICODE
+                        : LookKind.WORD_END_HALF_ASCII;
             };
             return new Hir.Look(kind);
         }
@@ -168,12 +204,9 @@ public final class Translator {
         // --- Perl character classes ---
 
         private Hir translateClassPerl(Ast.ClassPerl cp) throws Error {
-            if (flags.unicode) {
-                throw new Error(
-                        Error.ErrorKind.UNICODE_PERL_CLASS_NOT_FOUND,
-                        pattern, cp.span());
-            }
-            ClassUnicode cls = perlClassAscii(cp.kind());
+            ClassUnicode cls = flags.unicode
+                    ? perlClassUnicode(cp.kind())
+                    : perlClassAscii(cp.kind());
             if (cp.negated()) {
                 cls.negate();
             }
@@ -235,12 +268,9 @@ public final class Translator {
                                 Error.ErrorKind.UNICODE_PROPERTY_NOT_FOUND,
                                 pattern, unicode.span());
                 case ClassSetItem.Perl perl -> {
-                    if (flags.unicode) {
-                        throw new Error(
-                                Error.ErrorKind.UNICODE_PERL_CLASS_NOT_FOUND,
-                                pattern, perl.span());
-                    }
-                    ClassUnicode cls = perlClassAscii(perl.kind());
+                    ClassUnicode cls = flags.unicode
+                            ? perlClassUnicode(perl.kind())
+                            : perlClassAscii(perl.kind());
                     if (perl.negated()) {
                         cls.negate();
                     }
@@ -372,6 +402,21 @@ public final class Translator {
                         new ClassUnicodeRange('a', 'z')
                 );
             };
+        }
+
+        // --- Unicode Perl classes ---
+
+        static ClassUnicode perlClassUnicode(ClassPerlKind kind) {
+            int[][] table = switch (kind) {
+                case DIGIT -> PerlClassTables.DECIMAL_NUMBER;
+                case SPACE -> PerlClassTables.WHITE_SPACE;
+                case WORD -> PerlClassTables.PERL_WORD;
+            };
+            List<ClassUnicodeRange> ranges = new ArrayList<>(table.length);
+            for (int[] range : table) {
+                ranges.add(new ClassUnicodeRange(range[0], range[1]));
+            }
+            return new ClassUnicode(ranges);
         }
 
         // --- ASCII character classes ---

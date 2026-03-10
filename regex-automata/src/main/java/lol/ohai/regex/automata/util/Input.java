@@ -169,4 +169,27 @@ public final class Input {
     public int toCharOffset(int byteOffset) {
         return byteToChar[byteOffset];
     }
+
+    /**
+     * Creates a new Input with the same haystack and byteToChar mapping, but with
+     * different byte-level bounds and/or anchored flag.
+     */
+    public Input withBounds(int newStart, int newEnd, boolean newAnchored) {
+        return new Input(haystack, newStart, newEnd, newAnchored, byteToChar);
+    }
+
+    /**
+     * Returns true if the given byte offset is at a UTF-8 codepoint boundary.
+     * Positions 0 and haystack.length are always boundaries.
+     * A byte offset is a boundary if the byte at that position is not a
+     * UTF-8 continuation byte (0x80..0xBF).
+     */
+    public boolean isCharBoundary(int byteOffset) {
+        if (byteOffset == 0 || byteOffset >= haystack.length) {
+            return true;
+        }
+        // A UTF-8 continuation byte has the form 10xxxxxx (0x80-0xBF).
+        // A codepoint boundary starts with 0xxxxxxx, 110xxxxx, 1110xxxx, or 11110xxx.
+        return (haystack[byteOffset] & 0xC0) != 0x80;
+    }
 }
