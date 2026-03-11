@@ -126,7 +126,7 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
             SearchResult result = lazyDFA.searchFwd(input, cache.lazyDFACache());
             return switch (result) {
                 case SearchResult.Match m -> {
-                    Input narrowed = input.withBounds(input.start(), m.end(), input.isAnchored());
+                    Input narrowed = input.withBounds(input.start(), m.offset(), input.isAnchored());
                     yield pikeVM.search(narrowed, cache.pikeVMCache());
                 }
                 case SearchResult.NoMatch n -> null;
@@ -138,7 +138,7 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
             SearchResult result = lazyDFA.searchFwd(input, cache.lazyDFACache());
             return switch (result) {
                 case SearchResult.Match m -> {
-                    Input narrowed = input.withBounds(input.start(), m.end(), input.isAnchored());
+                    Input narrowed = input.withBounds(input.start(), m.offset(), input.isAnchored());
                     yield pikeVM.searchCaptures(narrowed, cache.pikeVMCache());
                 }
                 case SearchResult.NoMatch n -> null;
