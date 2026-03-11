@@ -2,6 +2,8 @@ package lol.ohai.regex.automata.nfa.thompson;
 
 import java.util.List;
 
+import lol.ohai.regex.automata.dfa.lazy.LookSet;
+
 /**
  * A compiled Thompson NFA.
  *
@@ -18,6 +20,7 @@ public final class NFA {
     private final int groupCount;
     private final List<String> groupNames;
     private final boolean reverse;
+    private final LookSet lookSetAny;
 
     /**
      * Creates a new NFA. Use {@link Builder} to construct instances.
@@ -29,9 +32,11 @@ public final class NFA {
      * @param groupCount       the number of capture groups (including group 0)
      * @param groupNames       the capture group names (null entries for unnamed groups)
      * @param reverse          {@code true} if this NFA was compiled for reverse search
+     * @param lookSetAny       union of all {@link lol.ohai.regex.syntax.hir.LookKind} values present in Look states
      */
     NFA(State[] states, int startAnchored, int startUnanchored,
-        int captureSlotCount, int groupCount, List<String> groupNames, boolean reverse) {
+        int captureSlotCount, int groupCount, List<String> groupNames, boolean reverse,
+        LookSet lookSetAny) {
         this.states = states;
         this.startAnchored = startAnchored;
         this.startUnanchored = startUnanchored;
@@ -39,6 +44,7 @@ public final class NFA {
         this.groupCount = groupCount;
         this.groupNames = groupNames;
         this.reverse = reverse;
+        this.lookSetAny = lookSetAny;
     }
 
     /**
@@ -100,5 +106,12 @@ public final class NFA {
      */
     public boolean isReverse() {
         return reverse;
+    }
+
+    /**
+     * Returns the union of all LookKind values present in State.Look nodes.
+     */
+    public LookSet lookSetAny() {
+        return lookSetAny;
     }
 }

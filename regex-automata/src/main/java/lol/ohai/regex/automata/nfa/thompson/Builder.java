@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import lol.ohai.regex.automata.dfa.lazy.LookSet;
+
 /**
  * Builder for constructing a Thompson {@link NFA}.
  *
@@ -127,6 +129,12 @@ public final class Builder {
      * @return the compiled NFA
      */
     public NFA build() {
+        LookSet lookSetAny = LookSet.EMPTY;
+        for (State s : states) {
+            if (s instanceof State.Look look) {
+                lookSetAny = lookSetAny.insert(look.look());
+            }
+        }
         return new NFA(
             states.toArray(new State[0]),
             startAnchored,
@@ -134,7 +142,8 @@ public final class Builder {
             captureSlotCount,
             groupCount,
             Collections.unmodifiableList(new ArrayList<>(groupNames)),
-            reverse
+            reverse,
+            lookSetAny
         );
     }
 }

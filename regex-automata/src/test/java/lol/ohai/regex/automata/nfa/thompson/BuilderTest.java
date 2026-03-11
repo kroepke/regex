@@ -1,5 +1,6 @@
 package lol.ohai.regex.automata.nfa.thompson;
 
+import lol.ohai.regex.automata.dfa.lazy.LookSet;
 import lol.ohai.regex.syntax.hir.LookKind;
 import org.junit.jupiter.api.Test;
 
@@ -126,6 +127,34 @@ class BuilderTest {
         State.BinaryUnion bu = (State.BinaryUnion) nfa.state(union);
         assertEquals(branchA, bu.alt1());
         assertEquals(branchB, bu.alt2());
+    }
+
+    @Test void lookSetAnyTracksLookStates() {
+        var builder = new Builder();
+        int s0 = builder.add(new State.Look(LookKind.START_TEXT, 0));
+        int s1 = builder.add(new State.Look(LookKind.WORD_BOUNDARY_ASCII, 0));
+        int s2 = builder.add(new State.CharRange('a', 'z', 0));
+        int s3 = builder.add(new State.Match(0));
+        builder.setStartAnchored(s0);
+        builder.setStartUnanchored(s0);
+        builder.setGroupInfo(1, 2, List.of((String) null));
+        NFA nfa = builder.build();
+
+        assertTrue(nfa.lookSetAny().contains(LookKind.START_TEXT));
+        assertTrue(nfa.lookSetAny().contains(LookKind.WORD_BOUNDARY_ASCII));
+        assertFalse(nfa.lookSetAny().contains(LookKind.END_TEXT));
+    }
+
+    @Test void lookSetAnyEmptyWhenNoLookStates() {
+        var builder = new Builder();
+        builder.add(new State.CharRange('a', 'z', 0));
+        builder.add(new State.Match(0));
+        builder.setStartAnchored(0);
+        builder.setStartUnanchored(0);
+        builder.setGroupInfo(1, 2, List.of((String) null));
+        NFA nfa = builder.build();
+
+        assertTrue(nfa.lookSetAny().isEmpty());
     }
 
     @Test
