@@ -2,8 +2,10 @@ package lol.ohai.regex.automata.nfa.thompson;
 
 import lol.ohai.regex.syntax.hir.ClassUnicode;
 import lol.ohai.regex.syntax.hir.Hir;
+import lol.ohai.regex.syntax.hir.LookKind;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -23,6 +25,7 @@ public final class Compiler {
 
     private final Builder builder = new Builder();
     private int nextCaptureIndex = 1; // 0 is reserved for the implicit group
+    private boolean reverse = false;
 
     private Compiler() {}
 
@@ -38,7 +41,48 @@ public final class Compiler {
         return c.compileInternal(hir);
     }
 
+    /**
+     * Compiles the given HIR into a reverse NFA (for backward searching).
+     *
+     * <p>The reverse NFA has concatenations and literals reversed so that
+     * a forward search on reversed input finds match start positions.
+     * Capture groups are omitted since the reverse NFA is only used for
+     * locating match boundaries, not extracting captures.</p>
+     *
+     * @param hir the high-level intermediate representation to compile
+     * @return the compiled reverse Thompson NFA
+     * @throws BuildError if the NFA cannot be built
+     */
+    public static NFA compileReverse(Hir hir) throws BuildError {
+        Compiler c = new Compiler();
+        c.reverse = true;
+        return c.compileInternal(hir);
+    }
+
     private NFA compileInternal(Hir hir) throws BuildError {
+        if (reverse) {
+            builder.reverse(true);
+            builder.setGroupInfo(0, 0, Collections.emptyList());
+
+            // Compile the body without group-0 capture wrapper
+            ThompsonRef body = compileNode(hir);
+
+            // Add Match state
+            int match = builder.add(new State.Match(0));
+            builder.patch(body.end(), match);
+
+            // Set up start states
+            builder.setStartAnchored(body.start());
+
+            // Unanchored: skip loop (same structure as forward)
+            int skipState = builder.add(new State.CharRange(0x0000, 0xFFFF, 0));
+            int startUnanchored = builder.add(new State.BinaryUnion(body.start(), skipState));
+            builder.patch(skipState, startUnanchored);
+            builder.setStartUnanchored(startUnanchored);
+
+            return builder.build();
+        }
+
         int groupCount = countGroups(hir) + 1; // +1 for implicit group 0
         int captureSlotCount = groupCount * 2;
         List<String> groupNames = new ArrayList<>();
@@ -120,6 +164,18 @@ public final class Compiler {
             return compileEmpty();
         }
 
+        if (reverse) {
+            // Reverse the char array order for reverse NFA
+            int first = builder.add(new State.CharRange(chars[chars.length - 1], chars[chars.length - 1], 0));
+            int prev = first;
+            for (int i = chars.length - 2; i >= 0; i--) {
+                int cur = builder.add(new State.CharRange(chars[i], chars[i], 0));
+                builder.patch(prev, cur);
+                prev = cur;
+            }
+            return new ThompsonRef(first, prev);
+        }
+
         int first = builder.add(new State.CharRange(chars[0], chars[0], 0));
         int prev = first;
         for (int i = 1; i < chars.length; i++) {
@@ -164,6 +220,18 @@ public final class Compiler {
      * of CharRange states.
      */
     private ThompsonRef compileCharSequence(int[][] seq) {
+        if (reverse) {
+            // Reverse the sequence order: for surrogate pairs [high, low] becomes [low, high]
+            int first = builder.add(new State.CharRange(seq[seq.length - 1][0], seq[seq.length - 1][1], 0));
+            int prev = first;
+            for (int i = seq.length - 2; i >= 0; i--) {
+                int cur = builder.add(new State.CharRange(seq[i][0], seq[i][1], 0));
+                builder.patch(prev, cur);
+                prev = cur;
+            }
+            return new ThompsonRef(first, prev);
+        }
+
         int first = builder.add(new State.CharRange(seq[0][0], seq[0][1], 0));
         int prev = first;
         for (int i = 1; i < seq.length; i++) {
@@ -178,8 +246,35 @@ public final class Compiler {
      * Look-around assertion: single Look state.
      */
     private ThompsonRef compileLook(Hir.Look look) {
-        int id = builder.add(new State.Look(look.look(), 0));
+        LookKind kind = reverse ? flipLookKind(look.look()) : look.look();
+        int id = builder.add(new State.Look(kind, 0));
         return new ThompsonRef(id, id);
+    }
+
+    /**
+     * Flips a look-around assertion direction for reverse NFA compilation.
+     * Start assertions become end assertions and vice versa.
+     * Symmetric assertions (word boundaries) are unchanged.
+     */
+    private static LookKind flipLookKind(LookKind kind) {
+        return switch (kind) {
+            case START_LINE -> LookKind.END_LINE;
+            case END_LINE -> LookKind.START_LINE;
+            case START_LINE_CRLF -> LookKind.END_LINE_CRLF;
+            case END_LINE_CRLF -> LookKind.START_LINE_CRLF;
+            case START_TEXT -> LookKind.END_TEXT;
+            case END_TEXT -> LookKind.START_TEXT;
+            case WORD_START_ASCII -> LookKind.WORD_END_ASCII;
+            case WORD_END_ASCII -> LookKind.WORD_START_ASCII;
+            case WORD_START_HALF_ASCII -> LookKind.WORD_END_HALF_ASCII;
+            case WORD_END_HALF_ASCII -> LookKind.WORD_START_HALF_ASCII;
+            case WORD_START_UNICODE -> LookKind.WORD_END_UNICODE;
+            case WORD_END_UNICODE -> LookKind.WORD_START_UNICODE;
+            case WORD_START_HALF_UNICODE -> LookKind.WORD_END_HALF_UNICODE;
+            case WORD_END_HALF_UNICODE -> LookKind.WORD_START_HALF_UNICODE;
+            case WORD_BOUNDARY_UNICODE, WORD_BOUNDARY_UNICODE_NEGATE,
+                 WORD_BOUNDARY_ASCII, WORD_BOUNDARY_ASCII_NEGATE -> kind;
+        };
     }
 
     /**
@@ -358,6 +453,11 @@ public final class Compiler {
      * Capture group: CaptureStart -> sub -> CaptureEnd.
      */
     private ThompsonRef compileCapture(Hir.Capture cap) throws BuildError {
+        if (reverse) {
+            // Skip capture slot instructions in reverse NFA, just compile the inner expression
+            return compileNode(cap.sub());
+        }
+
         int groupIndex = cap.index();
         int startSlot = groupIndex * 2;
         int endSlot = groupIndex * 2 + 1;
@@ -379,6 +479,17 @@ public final class Compiler {
         List<Hir> subs = concat.subs();
         if (subs.isEmpty()) {
             return compileEmpty();
+        }
+
+        if (reverse) {
+            // Iterate children in reverse order for reverse NFA
+            ThompsonRef result = compileNode(subs.getLast());
+            for (int i = subs.size() - 2; i >= 0; i--) {
+                ThompsonRef next = compileNode(subs.get(i));
+                builder.patch(result.end(), next.start());
+                result = new ThompsonRef(result.start(), next.end());
+            }
+            return result;
         }
 
         ThompsonRef result = compileNode(subs.getFirst());

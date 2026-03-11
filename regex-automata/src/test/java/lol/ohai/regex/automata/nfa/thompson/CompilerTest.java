@@ -1,5 +1,7 @@
 package lol.ohai.regex.automata.nfa.thompson;
 
+import lol.ohai.regex.automata.nfa.thompson.pikevm.PikeVM;
+import lol.ohai.regex.automata.util.Input;
 import lol.ohai.regex.syntax.ast.Ast;
 import lol.ohai.regex.syntax.ast.Parser;
 import lol.ohai.regex.syntax.hir.Hir;
@@ -211,7 +213,81 @@ class CompilerTest {
         assertTrue(found, "Expected CharRange for 'x'");
     }
 
+    // --- Reverse NFA tests ---
+
+    @Test
+    void reverseCompilationProducesReverseNFA() {
+        NFA nfa = compileReverse("ab");
+        assertTrue(nfa.isReverse());
+        assertEquals(0, nfa.captureSlotCount());
+        assertEquals(0, nfa.groupCount());
+    }
+
+    @Test
+    void reverseNFAMatchesReversedLiteral() {
+        NFA nfa = compileReverse("abc");
+        PikeVM vm = new PikeVM(nfa);
+        var cache = vm.createCache();
+        assertTrue(vm.isMatch(Input.of("cba"), cache));
+        assertFalse(vm.isMatch(Input.of("abc"), cache));
+    }
+
+    @Test
+    void reverseNFACaptureGroupsOmitted() {
+        NFA nfa = compileReverse("(a)(b)");
+        assertEquals(0, nfa.captureSlotCount());
+        assertEquals(0, nfa.groupCount());
+        assertTrue(nfa.isReverse());
+    }
+
+    @Test
+    void reverseNFACharClassMatchesBackwards() {
+        NFA nfa = compileReverse("[a-c]d");
+        PikeVM vm = new PikeVM(nfa);
+        var cache = vm.createCache();
+        assertTrue(vm.isMatch(Input.of("da"), cache));
+        assertFalse(vm.isMatch(Input.of("ad"), cache));
+    }
+
+    @Test
+    void reverseNFAAlternation() {
+        NFA nfa = compileReverse("ab|cd");
+        PikeVM vm = new PikeVM(nfa);
+        var cache = vm.createCache();
+        assertTrue(vm.isMatch(Input.of("ba"), cache));
+        assertTrue(vm.isMatch(Input.of("dc"), cache));
+        assertFalse(vm.isMatch(Input.of("ab"), cache));
+    }
+
+    @Test
+    void reverseNFARepetition() {
+        NFA nfa = compileReverse("a+b");
+        PikeVM vm = new PikeVM(nfa);
+        var cache = vm.createCache();
+        assertTrue(vm.isMatch(Input.of("ba"), cache));
+        assertTrue(vm.isMatch(Input.of("baaa"), cache));
+        assertFalse(vm.isMatch(Input.of("ab"), cache));
+    }
+
     // --- Helpers ---
+
+    private static Hir parse(String pattern) {
+        try {
+            Ast ast = Parser.parse(pattern, 250);
+            return Translator.translate(pattern, ast);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to parse pattern: " + pattern, e);
+        }
+    }
+
+    private static NFA compileReverse(String pattern) {
+        try {
+            Hir hir = parse(pattern);
+            return Compiler.compileReverse(hir);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to compile reverse pattern: " + pattern, e);
+        }
+    }
 
     private static NFA compile(String pattern) {
         try {
