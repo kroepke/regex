@@ -4,15 +4,30 @@ This document tracks features intentionally deferred from the initial lazy DFA i
 
 See `docs/superpowers/specs/2026-03-11-lazy-dfa-design.md` for the initial design spec.
 
-## Reverse DFA
+## Reverse DFA — Partially Implemented
 
 **What:** A DFA that searches backwards through the input to find match start positions.
 
-**Why it matters:** Currently, after the forward lazy DFA finds the match end, we run PikeVM on the narrowed window to find the start. A reverse DFA would find the start in O(n) with cached transitions, eliminating PikeVM from the non-capturing `search()` path entirely. Also a prerequisite for suffix and inner literal prefilters.
+**Status:** The reverse NFA compiler (`Compiler.compileReverse()`), reverse DFA search (`LazyDFA.searchRev()`), and `Strategy.Core` wiring are implemented. However, the three-phase search path (forward DFA → reverse DFA → direct result without PikeVM) is **not active** because the forward DFA overestimates match end for lazy quantifier and empty-alternative patterns (see "DFA Lazy Quantifier Limitation" below). The current `search()` path uses two-phase: forward DFA narrows the window, PikeVM finds the exact match.
 
-**When to add:** After the forward lazy DFA is stable and benchmarked. This is the highest-priority gap.
+**Remaining work:**
+- Activate three-phase search once the forward DFA correctly handles lazy quantifiers
+- Suffix and inner literal prefilter strategies that use the reverse DFA as primary search driver
+- These strategies will use the reverse NFA's unanchored start state
 
-**Complexity:** Medium-high. Requires building a reverse NFA (or reversing the existing one), a second `LazyDFA` instance, and coordinating forward/reverse search in `Strategy.Core`.
+**Design spec:** `docs/superpowers/specs/2026-03-11-reverse-dfa-design.md`
+
+## DFA Lazy Quantifier Limitation
+
+**What:** The forward lazy DFA always finds leftmost-longest matches, even for lazy quantifiers (`*?`, `+?`, `??`) and patterns with empty alternatives (`|b`, `(?:)+|b`).
+
+**Why it matters:** The DFA's `computeNextState` iterates NFA states in sorted order (ascending state ID). Because the `Match` state has a high ID, char-consuming states are processed before `Match` during epsilon closure. This means the DFA continues matching past where a lazy quantifier would stop, or past where an empty alternative would match. For example, `(?U)a+` on `"aaa"` should match `"a"` (lazy) but the DFA matches `"aaa"` (greedy). This prevents the three-phase search (forward DFA → reverse DFA → done) from being activated, since the forward DFA's overestimated match end would cause the reverse DFA to compute an incorrect start position.
+
+**How upstream handles it:** The Rust crate's DFA also finds leftmost-first matches (which for DFAs means leftmost-longest within the forward pass). The upstream handles this by always using PikeVM for the final match refinement when lazy semantics matter. The three-phase search in upstream is used for the common case where greedy/lazy distinction doesn't affect the match span (e.g., `[a-z]+` where the DFA match end equals the PikeVM match end).
+
+**When to fix:** This is a fundamental property of DFA-based matching. The fix is to detect patterns where lazy/greedy semantics can affect match span and only use three-phase search for patterns where they can't. This requires HIR-level analysis.
+
+**Complexity:** Medium. Requires pattern analysis to determine when three-phase is safe.
 
 ## Overlapping Match Mode
 

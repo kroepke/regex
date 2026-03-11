@@ -93,10 +93,14 @@ public final class Regex {
                 PikeVM pikeVM = new PikeVM(nfa);
                 LazyDFA forwardDFA = LazyDFA.create(nfa, charClasses);
 
-                // Build reverse DFA for start-position finding
-                NFA reverseNfa = Compiler.compileReverse(hir);
-                CharClasses reverseCharClasses = CharClassBuilder.build(reverseNfa);
-                LazyDFA reverseDFA = LazyDFA.create(reverseNfa, reverseCharClasses);
+                // Build reverse DFA only when forward DFA is available (both bail
+                // out on the same condition: look-assertion states in the NFA).
+                LazyDFA reverseDFA = null;
+                if (forwardDFA != null) {
+                    NFA reverseNfa = Compiler.compileReverse(hir);
+                    CharClasses reverseCharClasses = CharClassBuilder.build(reverseNfa);
+                    reverseDFA = LazyDFA.create(reverseNfa, reverseCharClasses);
+                }
 
                 strategy = new Strategy.Core(pikeVM, forwardDFA, reverseDFA, prefilter);
                 namedGroups = buildNamedGroupMap(nfa);
