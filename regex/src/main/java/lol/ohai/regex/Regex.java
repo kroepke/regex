@@ -235,6 +235,7 @@ public final class Regex {
      */
     private abstract class BaseFindIterator<T> implements Iterator<T> {
         final CharSequence text;
+        private final Input baseInput;
         private int searchCharStart = 0;
         private int lastMatchCharEnd = -1; // -1 = no match yet
         private T nextResult;
@@ -242,6 +243,7 @@ public final class Regex {
 
         BaseFindIterator(CharSequence text) {
             this.text = text;
+            this.baseInput = Input.of(text);
         }
 
         abstract lol.ohai.regex.automata.util.Captures doSearch(
@@ -274,7 +276,7 @@ public final class Regex {
                     return;
                 }
 
-                Input input = Input.of(text, searchCharStart, text.length());
+                Input input = baseInput.withBounds(searchCharStart, text.length(), false);
                 lol.ohai.regex.automata.util.Captures caps = doSearch(input, cache);
 
                 if (caps == null) {

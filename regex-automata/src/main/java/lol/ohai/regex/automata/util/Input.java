@@ -24,8 +24,11 @@ public final class Input {
      * Creates an unanchored search input from the given text, searching the entire string.
      */
     public static Input of(CharSequence text) {
-        char[] chars = text.toString().toCharArray();
-        return new Input(chars, 0, chars.length, false);
+        String str = text.toString();
+        char[] chars = str.toCharArray();
+        Input in = new Input(chars, 0, chars.length, false);
+        in.haystackStr = str;
+        return in;
     }
 
     /**
@@ -33,16 +36,22 @@ public final class Input {
      * char offsets {@code start} (inclusive) and {@code end} (exclusive).
      */
     public static Input of(CharSequence text, int start, int end) {
-        char[] chars = text.toString().toCharArray();
-        return new Input(chars, start, end, false);
+        String str = text.toString();
+        char[] chars = str.toCharArray();
+        Input in = new Input(chars, start, end, false);
+        in.haystackStr = str;
+        return in;
     }
 
     /**
      * Creates an anchored search input from the given text.
      */
     public static Input anchored(CharSequence text) {
-        char[] chars = text.toString().toCharArray();
-        return new Input(chars, 0, chars.length, true);
+        String str = text.toString();
+        char[] chars = str.toCharArray();
+        Input in = new Input(chars, 0, chars.length, true);
+        in.haystackStr = str;
+        return in;
     }
 
     /** Returns the char[] haystack. */
