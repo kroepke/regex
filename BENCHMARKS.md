@@ -66,9 +66,44 @@ Patterns that cause catastrophic backtracking in java.util.regex:
 | `quadratic1000Ohai/Jdk` | `.*[^A-Z]\|[A-Z]` | 1000 A's | Quadratic behavior |
 | `backtrackOhai/Jdk` | `(a+)+b` | 25 a's | Classic backtracking |
 
-## Results (2026-03-10, post UTF-16 migration)
+## Results (2026-03-11, post meta engine + literal prefilter)
 
 ### Search throughput (ops/s, higher is better)
+
+| Benchmark | ohai | JDK | Ratio | Change |
+|---|---|---|---|---|
+| literal | **4,753** | 3,168 | **1.5x faster** | was 233x slower |
+| charClass | 12.9 | 231 | 18x slower | was ~4,750x slower |
+| alternation | 44.5 | 105 | 2.4x slower | was 17x slower |
+| captures | 59.5 | 15,940 | 268x slower | unchanged |
+| unicodeWord | 13.0 | 32,961 | 2,536x slower | unchanged |
+
+### Pathological patterns (ops/s, higher is better)
+
+| Benchmark | ohai | JDK | Ratio |
+|---|---|---|---|
+| backtrack `(a+)+b` | **455,849** | 224,292 | **2.0x faster** |
+| redosShort | 36,631 | 92,736 | 2.5x slower |
+| redosLong (900KB) | 378 | N/A (hangs) | **ohai wins** |
+| quadratic100 | 1,481 | 112,298 | 76x slower |
+| quadratic1000 | 17.1 | 1,424 | 83x slower |
+
+### Compilation (ops/s, higher is better)
+
+| Benchmark | ohai | JDK | Ratio |
+|---|---|---|---|
+| simple | 1,124K | 10,434K | 9x slower |
+| medium | 53K | 7,605K | 143x slower |
+| complex | 744K | 12,296K | 17x slower |
+| unicode | 31K | 18,227K | 588x slower |
+| alternation | 365K | 3,892K | 11x slower |
+
+### Previous results (2026-03-10, pre meta engine)
+
+<details>
+<summary>Click to expand</summary>
+
+#### Search throughput
 
 | Benchmark | ohai | JDK | Ratio |
 |---|---|---|---|
@@ -78,7 +113,7 @@ Patterns that cause catastrophic backtracking in java.util.regex:
 | captures | 57 | 14,885 | 261x slower |
 | unicodeWord | 12.1 | 31,946 | 2,643x slower |
 
-### Pathological patterns (ops/s, higher is better)
+#### Pathological patterns
 
 | Benchmark | ohai | JDK | Ratio |
 |---|---|---|---|
@@ -88,7 +123,7 @@ Patterns that cause catastrophic backtracking in java.util.regex:
 | quadratic100 | 1,323 | 111,278 | 84x slower |
 | quadratic1000 | 16.6 | 1,408 | 85x slower |
 
-### Compilation (ops/s, higher is better)
+#### Compilation
 
 | Benchmark | ohai | JDK | Ratio |
 |---|---|---|---|
@@ -98,37 +133,34 @@ Patterns that cause catastrophic backtracking in java.util.regex:
 | unicode | 30K | 17,972K | 599x slower |
 | alternation | 434K | 3,900K | 9x slower |
 
+</details>
+
 ## Analysis
 
-### Why is ohai slower than JDK for simple searches?
+### Meta engine impact (2026-03-11)
 
-This is **expected and by design**. Our engine currently has only one search strategy: the PikeVM (Thompson NFA simulation). The PikeVM explores every NFA state at every char position, giving O(m × n) guaranteed linear time — but it does a lot of work per character for simple patterns.
+The meta engine with literal prefilters delivered dramatic improvements:
 
-The JDK's `java.util.regex` uses an optimized backtracking engine with:
-- Literal prefix extraction (Boyer-Moore-style skipping)
-- Internal DFA optimization for simple patterns
-- Heavily tuned native code paths
+- **literal (`Sherlock Holmes`)**: 13.7 → 4,753 ops/s (**347x faster**, now **1.5x faster than JDK**). The `PrefilterOnly` strategy bypasses the NFA entirely, using `String.indexOf()` (a JIT intrinsic) for pure literal patterns.
+- **alternation (`Sherlock|Watson|Holmes|Irene`)**: 6.1 → 44.5 ops/s (**7.3x faster**). The `Core` strategy with `MultiLiteral` prefilter narrows candidates before PikeVM confirmation. Still 2.4x slower than JDK because multi-`indexOf` (one per alternative) is less efficient than JDK's native alternation optimization.
+- **charClass (`[a-zA-Z]+`)**: 0.062 → 12.9 ops/s (**208x faster**). No prefilter (character classes have no extractable prefix), but the `Input` reuse optimization in `findAll` eliminated per-iteration 900KB char[] allocations that were killing GC.
 
-The upstream Rust regex crate has the **same architecture** — its PikeVM is equally slow for simple literals. The Rust crate achieves competitive throughput through the **meta engine**, which selects from:
-
-1. **Literal prefilters** (memchr/SIMD) — for patterns with extractable literal prefixes, the regex engine is bypassed entirely and SIMD-accelerated substring search is used
-2. **Lazy/Hybrid DFA** — builds DFA states on demand, O(1) per char, handles most patterns
-3. **Full DFA** — pre-compiled, fastest search, limited patterns
-4. **BoundedBacktracker** — NFA + backtracking with captures
-5. **PikeVM** — last-resort fallback for the most complex patterns
+Patterns without extractable prefixes (`captures`, `unicodeWord`) are unchanged — they still use pure PikeVM through the `Core` strategy with no prefilter.
 
 ### Where ohai wins
 
-The backtracking benchmark `(a+)+b` on `"aaa..."` (no match) shows our advantage: **2.3x faster than JDK**. The JDK's backtracking engine explores exponentially many paths; our PikeVM processes it in linear time. The ReDoS benchmark on 900KB input demonstrates the safety guarantee — JDK hangs, we complete in ~2.7ms.
+The backtracking benchmark `(a+)+b` on `"aaa..."` (no match) shows our advantage: **2.0x faster than JDK**. The JDK's backtracking engine explores exponentially many paths; our PikeVM processes it in linear time. The ReDoS benchmark on 900KB input demonstrates the safety guarantee — JDK hangs, we complete in ~2.6ms.
+
+The literal search benchmark now **beats JDK by 1.5x** thanks to the `PrefilterOnly` strategy — pure `String.indexOf()` with no regex engine overhead.
 
 ### Roadmap to competitive throughput
 
-To close the gap with JDK for common patterns, the following features from the upstream architecture are needed (roughly in priority order):
+To close the remaining gap with JDK for non-literal patterns:
 
-1. **Literal prefilter extraction** — identify patterns with literal prefixes/suffixes and use `String.indexOf()` or vectorized search to skip ahead. This alone would close much of the gap for literal-heavy patterns.
-2. **Lazy/Hybrid DFA** — build DFA states on demand during search. O(1) per char instead of O(m). This is the main throughput engine in the Rust crate.
-3. **Meta engine** — automatically select the best strategy based on pattern characteristics.
-4. **One-pass DFA** — for simple patterns that can be matched in a single left-to-right pass with captures.
+1. **Lazy/Hybrid DFA** — build DFA states on demand during search. O(1) per char instead of O(m). This is the main throughput engine in the upstream Rust crate and would dramatically improve `charClass`, `alternation`, `captures`, and `unicodeWord`.
+2. **Suffix/inner literal prefilters** — requires a reverse engine to determine match start position. Would help patterns like `\w+\s+Holmes` where the literal is not a prefix.
+3. **One-pass DFA** — for simple patterns that can be matched in a single left-to-right pass with captures.
+4. **Aho-Corasick** — for alternations with many branches (>10), more efficient than multi-`indexOf`.
 5. **SIMD acceleration** — Java's Vector API or `MemorySegment` for vectorized literal scanning.
 
 ### Compilation cost
