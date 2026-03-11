@@ -188,7 +188,7 @@ The reverse DFA doesn't participate in the search path yet. All search and patho
 
 #### Compilation cost increased
 
-Adding a reverse NFA + CharClasses + LazyDFA per pattern roughly doubles the compilation work for patterns without look-assertions. Patterns with look-assertions (e.g., `^`, `$`, `\b`) skip reverse DFA compilation since both forward and reverse DFAs bail out.
+Adding a reverse NFA + CharClasses + LazyDFA per pattern roughly doubles the compilation work for patterns without look-assertions. Patterns with ASCII-only look-assertions (e.g., `^`, `$`, `(?-u:\b)`) now build both forward and reverse DFAs. Patterns with Unicode word boundaries or CRLF line anchors still skip DFA compilation.
 
 ### Where ohai wins
 
@@ -200,10 +200,10 @@ Adding a reverse NFA + CharClasses + LazyDFA per pattern roughly doubles the com
 
 To close the remaining gap with JDK for Unicode-heavy patterns:
 
-1. **Look-around encoding in DFA states** — the `look_have`/`look_need` approach from the Rust crate would let the DFA handle `^`, `$`, `\b` inline instead of bailing out. This is the highest-priority gap — most benchmark patterns contain look-assertions. See `docs/architecture/lazy-dfa-gaps.md`.
+1. ~~**Look-around encoding in DFA states**~~ — **DONE** (2026-03-11). The DFA now handles `^`, `$`, `(?m)^`, `(?m)$`, and ASCII word boundaries (`(?-u:\b)`, `(?-u:\B)`) inline. Unicode word boundaries and CRLF line anchors still bail out to PikeVM. The current search benchmarks don't exercise look-assertion patterns so no throughput change is visible, but patterns like `^abc` and `(?m)^line$` now benefit from DFA acceleration.
 2. **Suffix/inner literal prefilters** — patterns like `\w+\s+Holmes` have an extractable literal suffix. The reverse DFA infrastructure is now in place for this. This is the next highest-impact optimization.
 3. **Three-phase search activation** — requires HIR-level analysis to determine when lazy/greedy semantics don't affect match span, so the reverse DFA can safely replace PikeVM for start-position finding.
-4. **Quit bytes** — instead of bailing out entirely for Unicode patterns, designate rare char values as "quit" triggers and fall back to PikeVM only at those points, keeping the DFA for the common case.
+4. **Quit bytes** — instead of bailing out entirely for Unicode word boundaries, designate rare char values as "quit" triggers and fall back to PikeVM only at those points, keeping the DFA for the common case.
 5. **One-pass DFA** — for simple patterns that can be matched in a single left-to-right pass with captures.
 6. **Aho-Corasick** — for alternations with many branches (>10), more efficient than multi-`indexOf`.
 7. **SIMD acceleration** — Java's Vector API or `MemorySegment` for vectorized literal scanning.
