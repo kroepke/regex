@@ -17,6 +17,7 @@ public final class NFA {
     private final int captureSlotCount;
     private final int groupCount;
     private final List<String> groupNames;
+    private final boolean reverse;
 
     /**
      * Creates a new NFA. Use {@link Builder} to construct instances.
@@ -27,15 +28,17 @@ public final class NFA {
      * @param captureSlotCount the total number of capture slots (groupCount * 2)
      * @param groupCount       the number of capture groups (including group 0)
      * @param groupNames       the capture group names (null entries for unnamed groups)
+     * @param reverse          {@code true} if this NFA was compiled for reverse search
      */
     NFA(State[] states, int startAnchored, int startUnanchored,
-        int captureSlotCount, int groupCount, List<String> groupNames) {
+        int captureSlotCount, int groupCount, List<String> groupNames, boolean reverse) {
         this.states = states;
         this.startAnchored = startAnchored;
         this.startUnanchored = startUnanchored;
         this.captureSlotCount = captureSlotCount;
         this.groupCount = groupCount;
         this.groupNames = groupNames;
+        this.reverse = reverse;
     }
 
     /**
@@ -90,5 +93,12 @@ public final class NFA {
      */
     public List<String> groupNames() {
         return groupNames;
+    }
+
+    /**
+     * Returns {@code true} if this NFA was compiled for reverse search.
+     */
+    public boolean isReverse() {
+        return reverse;
     }
 }

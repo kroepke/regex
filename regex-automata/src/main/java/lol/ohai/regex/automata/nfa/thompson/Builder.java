@@ -18,6 +18,7 @@ public final class Builder {
     private int captureSlotCount = 0;
     private int groupCount = 0;
     private final List<String> groupNames = new ArrayList<>();
+    private boolean reverse = false;
 
     /**
      * Adds a state to the NFA and returns its state ID.
@@ -110,6 +111,17 @@ public final class Builder {
     }
 
     /**
+     * Sets whether this NFA is being compiled for reverse search.
+     *
+     * @param reverse {@code true} if the NFA should be used for reverse search
+     * @return this builder
+     */
+    public Builder reverse(boolean reverse) {
+        this.reverse = reverse;
+        return this;
+    }
+
+    /**
      * Builds and returns the NFA.
      *
      * @return the compiled NFA
@@ -121,7 +133,8 @@ public final class Builder {
             startUnanchored,
             captureSlotCount,
             groupCount,
-            Collections.unmodifiableList(new ArrayList<>(groupNames))
+            Collections.unmodifiableList(new ArrayList<>(groupNames)),
+            reverse
         );
     }
 }
