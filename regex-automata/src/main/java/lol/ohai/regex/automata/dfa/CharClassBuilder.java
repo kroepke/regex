@@ -67,7 +67,26 @@ public final class CharClassBuilder {
             }
         }
 
-        return new CharClasses(uniqueRows.toArray(byte[][]::new), highIndex, classCount);
+        boolean[] wordClass = new boolean[classCount];
+        boolean[] lineLF = new boolean[classCount];
+        boolean[] lineCR = new boolean[classCount];
+        for (int cls = 0; cls < classCount && cls < sortedBounds.length - 1; cls++) {
+            int representative = sortedBounds[cls]; // first char in this class
+            if (representative < 65536) {
+                char c = (char) representative;
+                wordClass[cls] = isWordChar(c);
+                lineLF[cls] = (c == '\n');
+                lineCR[cls] = (c == '\r');
+            }
+        }
+
+        return new CharClasses(uniqueRows.toArray(byte[][]::new), highIndex, classCount,
+                wordClass, lineLF, lineCR);
+    }
+
+    private static boolean isWordChar(char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                || (c >= '0' && c <= '9') || c == '_';
     }
 
     private record ByteArrayKey(byte[] data) {
