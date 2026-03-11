@@ -45,7 +45,9 @@ See `docs/superpowers/specs/2026-03-11-lazy-dfa-design.md` for the initial desig
 
 **Why it matters:** Useful for patterns that are ASCII-only — non-ASCII chars can trigger a quit, avoiding DFA state explosion on Unicode input. The upstream uses this for `\b` (Unicode word boundary) which would require enormous state sets to handle in the DFA.
 
-**When to add:** When we observe specific patterns where the DFA's cache thrashes on Unicode input that could be avoided by quitting early on non-ASCII chars. May also be needed for correct `\b` handling in the DFA.
+**Current state:** The DFA currently bails out entirely (returns null from `LazyDFA.create()`) for patterns with unsupported look kinds (Unicode word boundaries, CRLF line anchors). A more fine-grained approach using quit bytes would allow the DFA to handle the ASCII portions of these patterns and only quit at specific char values.
+
+**When to add:** When we observe specific patterns where the full bail-out is too conservative and a quit-byte approach would let the DFA handle more of the search.
 
 **Complexity:** Low. Add a `BitSet` of quit chars, check in the search loop before the transition.
 
@@ -69,24 +71,18 @@ See `docs/superpowers/specs/2026-03-11-lazy-dfa-design.md` for the initial desig
 
 **Complexity:** Low-medium. Need to handle the case where a special state is hit mid-batch (rewind and process one at a time).
 
-## Look-Around Encoding in DFA States
+## Look-Around Encoding in DFA States — Implemented
 
-**What:** Encode look-around assertion context (`look_have`/`look_need` bitsets, word-char flags, CRLF state) in the DFA state content, so the DFA can evaluate `^`, `$`, `\b`, `\B`, and `(?m)` anchors natively without delegating to PikeVM.
+**Status: DONE** (2026-03-11)
 
-**Why it matters:** The initial lazy DFA bails out entirely for patterns containing look-assertions — `Strategy.Core` skips the lazy DFA and uses PikeVM directly. This means common patterns like `^\w+`, `\bword\b`, and multiline patterns don't benefit from the DFA at all. The upstream Rust crate encodes look-behind as part of the DFA state key, allowing the DFA to handle these assertions natively.
+The lazy DFA now encodes look-behind context (`lookHave`, `lookNeed`, `isFromWord`, `isHalfCrlf`) in DFA state keys. The epsilon closure conditionally follows `State.Look` transitions based on which assertions are currently satisfied. A two-phase computation resolves look-ahead on the source state (Phase 1) and look-behind on the destination state (Phase 2).
 
-**When to add:** After the forward lazy DFA is stable and benchmarked. This is the second-highest priority gap (after reverse DFA). It's needed before the lazy DFA can be a universal replacement for PikeVM.
+**Supported look kinds:** `START_TEXT`, `END_TEXT`, `START_LINE`, `END_LINE`, `WORD_BOUNDARY_ASCII`, `WORD_BOUNDARY_ASCII_NEGATE`, `WORD_START_ASCII`, `WORD_END_ASCII`, `WORD_START_HALF_ASCII`, `WORD_END_HALF_ASCII`.
 
-**Complexity:** Medium. Requires extending `StateContent` to include look-behind flags, tracking the previous char class in the search loop, and correctly computing `look_have` during epsilon closure.
+**Unsupported (DFA bails to PikeVM):** `WORD_BOUNDARY_UNICODE`, `WORD_BOUNDARY_UNICODE_NEGATE`, `WORD_START_UNICODE`, `WORD_END_UNICODE`, `WORD_START_HALF_UNICODE`, `WORD_END_HALF_UNICODE`, `START_LINE_CRLF`, `END_LINE_CRLF`. These require Unicode word-char property tables or CRLF-specific handling that the DFA's compact character classification doesn't support.
 
-## Anchored Start State Optimization
+## Anchored Start State Optimization — Implemented
 
-**What:** Specialized start state handling for anchored searches beyond the basic anchored/unanchored distinction.
+**Status: DONE** (2026-03-11)
 
-**Why it matters:** The upstream has per-byte start state groups that encode look-behind context at the start position. This allows the DFA to immediately resolve start-of-line anchors without special epsilon closure handling.
-
-**When to add:** When anchored search performance becomes a bottleneck, or when look-behind encoding (above) is implemented.
-
-**Note:** The upstream uses a `StartByteMap` that maps the byte before the start position to a start state group, enabling correct `\b` and `^` after `\n` handling at search start. This is a prerequisite once look-assertion encoding is supported.
-
-**Complexity:** Medium. More start states to compute and cache.
+The `Start` enum encodes look-behind context at the search start position (TEXT, LINE_LF, LINE_CR, WORD_BYTE, NON_WORD_BYTE), with 5 variants × 2 (anchored/unanchored) = 10 DFA start states. `DFACache.startStates` caches these, and `Start.from()` selects the correct start state based on the character before the search start position. This is used by `getOrComputeStartState()` when `lookSetAny` is non-empty.
