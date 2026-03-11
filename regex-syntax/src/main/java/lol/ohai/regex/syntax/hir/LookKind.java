@@ -39,5 +39,10 @@ public enum LookKind {
     /** Start-half of a Unicode word boundary ({@code \b\{start-half\}}). */
     WORD_START_HALF_UNICODE,
     /** End-half of a Unicode word boundary ({@code \b\{end-half\}}). */
-    WORD_END_HALF_UNICODE
+    WORD_END_HALF_UNICODE;
+
+    /** Returns the single-bit mask for this look kind: {@code 1 << ordinal()}. */
+    public int asBit() {
+        return 1 << ordinal();
+    }
 }
