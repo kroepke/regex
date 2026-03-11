@@ -84,3 +84,9 @@ The project uses Maven with a wrapper script (`./mvnw`). Always use the wrapper 
 - Benchmark before and after significant changes (JMH)
 - The upstream's test data in `upstream/regex/testdata/` contains comprehensive test cases — use these
 - Thread safety via thread-local pools for engine scratch space, matching upstream's approach
+
+## Architecture Gaps
+
+Features intentionally deferred from initial implementations. Check these before adding new engines or optimizations — the gap may already be documented with design notes.
+
+- **Lazy DFA gaps** — `docs/architecture/lazy-dfa-gaps.md`: reverse DFA, look-around encoding, overlapping mode, quit bytes, loop unrolling, per-pattern start states, anchored start state optimization
