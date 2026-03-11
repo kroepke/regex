@@ -14,10 +14,12 @@ import lol.ohai.regex.automata.util.Input;
  * <p>{@code PrefilterOnly} handles patterns that are entirely fixed-length
  * literals — no regex engine needed, just {@code indexOf}.</p>
  *
- * <p>{@code Core} composes the PikeVM and optional LazyDFA with an optional
- * prefilter. When a LazyDFA is available, search uses a two-phase approach:
- * the DFA finds the end position, then the PikeVM runs on a narrowed window
- * to find the start position and captures.</p>
+ * <p>{@code Core} composes the PikeVM with optional forward and reverse LazyDFAs
+ * and an optional prefilter. When both DFAs are available, search uses a
+ * three-phase approach: the forward DFA finds the end position, the reverse DFA
+ * finds the start position, and (for captures) the PikeVM runs on the narrowed
+ * window. When only the forward DFA is available, falls back to two-phase
+ * (forward DFA + PikeVM).</p>
  */
 public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
 
@@ -27,19 +29,21 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
     Captures searchCaptures(Input input, Cache cache);
 
     /**
-     * Core strategy: PikeVM + optional LazyDFA + optional prefilter.
+     * Core strategy: PikeVM + optional forward/reverse LazyDFAs + optional prefilter.
      *
-     * @param pikeVM    the PikeVM engine
-     * @param lazyDFA   the lazy DFA engine, or {@code null} if not available
-     * @param prefilter the prefilter to use, or {@code null} for pure engine search
+     * @param pikeVM     the PikeVM engine
+     * @param forwardDFA the forward lazy DFA engine, or {@code null} if not available
+     * @param reverseDFA the reverse lazy DFA engine, or {@code null} if not available
+     * @param prefilter  the prefilter to use, or {@code null} for pure engine search
      */
-    record Core(PikeVM pikeVM, LazyDFA lazyDFA, Prefilter prefilter) implements Strategy {
+    record Core(PikeVM pikeVM, LazyDFA forwardDFA, LazyDFA reverseDFA, Prefilter prefilter) implements Strategy {
 
         @Override
         public Cache createCache() {
             return new Cache(
                     pikeVM.createCache(),
-                    lazyDFA != null ? lazyDFA.createCache() : null
+                    forwardDFA != null ? forwardDFA.createCache() : null,
+                    reverseDFA != null ? reverseDFA.createCache() : null
             );
         }
 
@@ -48,8 +52,8 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
             if (prefilter != null && !input.isAnchored()) {
                 return isMatchPrefilter(input, cache);
             }
-            if (lazyDFA != null) {
-                SearchResult result = lazyDFA.searchFwd(input, cache.lazyDFACache());
+            if (forwardDFA != null) {
+                SearchResult result = forwardDFA.searchFwd(input, cache.forwardDFACache());
                 return switch (result) {
                     case SearchResult.Match m -> true;
                     case SearchResult.NoMatch n -> false;
@@ -70,8 +74,8 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
                     return false;
                 }
                 Input candidateInput = input.withBounds(pos, end, false);
-                if (lazyDFA != null) {
-                    SearchResult r = lazyDFA.searchFwd(candidateInput, cache.lazyDFACache());
+                if (forwardDFA != null) {
+                    SearchResult r = forwardDFA.searchFwd(candidateInput, cache.forwardDFACache());
                     switch (r) {
                         case SearchResult.Match m -> { return true; }
                         case SearchResult.NoMatch n -> { start = pos + 1; continue; }
@@ -94,13 +98,13 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
         @Override
         public Captures search(Input input, Cache cache) {
             if (prefilter != null && !input.isAnchored()) {
-                if (lazyDFA != null) {
+                if (forwardDFA != null) {
                     return prefilterLoop(input, cache, (in, c) -> dfaTwoPhaseSearch(in, c));
                 }
                 return prefilterLoop(input, cache,
                         (in, c) -> pikeVM.search(in, c.pikeVMCache()));
             }
-            if (lazyDFA != null) {
+            if (forwardDFA != null) {
                 return dfaTwoPhaseSearch(input, cache);
             }
             return pikeVM.search(input, cache.pikeVMCache());
@@ -109,24 +113,45 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
         @Override
         public Captures searchCaptures(Input input, Cache cache) {
             if (prefilter != null && !input.isAnchored()) {
-                if (lazyDFA != null) {
+                if (forwardDFA != null) {
                     return prefilterLoop(input, cache,
                             (in, c) -> dfaTwoPhaseSearchCaptures(in, c));
                 }
                 return prefilterLoop(input, cache,
                         (in, c) -> pikeVM.searchCaptures(in, c.pikeVMCache()));
             }
-            if (lazyDFA != null) {
+            if (forwardDFA != null) {
                 return dfaTwoPhaseSearchCaptures(input, cache);
             }
             return pikeVM.searchCaptures(input, cache.pikeVMCache());
         }
 
         private Captures dfaTwoPhaseSearch(Input input, Cache cache) {
-            SearchResult result = lazyDFA.searchFwd(input, cache.lazyDFACache());
-            return switch (result) {
+            SearchResult fwdResult = forwardDFA.searchFwd(input, cache.forwardDFACache());
+            return switch (fwdResult) {
                 case SearchResult.Match m -> {
-                    Input narrowed = input.withBounds(input.start(), m.offset(), input.isAnchored());
+                    int matchEnd = m.offset();
+                    if (reverseDFA != null) {
+                        Input revInput = input.withBounds(input.start(), matchEnd, true);
+                        SearchResult revResult = reverseDFA.searchRev(revInput, cache.reverseDFACache());
+                        yield switch (revResult) {
+                            case SearchResult.Match rm -> {
+                                Captures caps = new Captures(pikeVM.nfa().groupCount());
+                                caps.set(0, rm.offset());
+                                caps.set(1, matchEnd);
+                                yield caps;
+                            }
+                            case SearchResult.NoMatch n -> {
+                                Input narrowed = input.withBounds(input.start(), matchEnd, input.isAnchored());
+                                yield pikeVM.search(narrowed, cache.pikeVMCache());
+                            }
+                            case SearchResult.GaveUp g -> {
+                                Input narrowed = input.withBounds(input.start(), matchEnd, input.isAnchored());
+                                yield pikeVM.search(narrowed, cache.pikeVMCache());
+                            }
+                        };
+                    }
+                    Input narrowed = input.withBounds(input.start(), matchEnd, input.isAnchored());
                     yield pikeVM.search(narrowed, cache.pikeVMCache());
                 }
                 case SearchResult.NoMatch n -> null;
@@ -135,10 +160,19 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
         }
 
         private Captures dfaTwoPhaseSearchCaptures(Input input, Cache cache) {
-            SearchResult result = lazyDFA.searchFwd(input, cache.lazyDFACache());
-            return switch (result) {
+            SearchResult fwdResult = forwardDFA.searchFwd(input, cache.forwardDFACache());
+            return switch (fwdResult) {
                 case SearchResult.Match m -> {
-                    Input narrowed = input.withBounds(input.start(), m.offset(), input.isAnchored());
+                    int matchEnd = m.offset();
+                    if (reverseDFA != null) {
+                        Input revInput = input.withBounds(input.start(), matchEnd, true);
+                        SearchResult revResult = reverseDFA.searchRev(revInput, cache.reverseDFACache());
+                        if (revResult instanceof SearchResult.Match rm) {
+                            Input narrowed = input.withBounds(rm.offset(), matchEnd, true);
+                            yield pikeVM.searchCaptures(narrowed, cache.pikeVMCache());
+                        }
+                    }
+                    Input narrowed = input.withBounds(input.start(), matchEnd, input.isAnchored());
                     yield pikeVM.searchCaptures(narrowed, cache.pikeVMCache());
                 }
                 case SearchResult.NoMatch n -> null;
@@ -206,13 +240,15 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
     }
 
     /**
-     * Per-search mutable state. Wraps a PikeVM cache and optional LazyDFA cache.
-     * {@code EMPTY} is used by {@link PrefilterOnly} which needs no engine state.
+     * Per-search mutable state. Wraps a PikeVM cache and optional forward/reverse
+     * LazyDFA caches. {@code EMPTY} is used by {@link PrefilterOnly} which needs
+     * no engine state.
      */
     record Cache(
             lol.ohai.regex.automata.nfa.thompson.pikevm.Cache pikeVMCache,
-            DFACache lazyDFACache
+            DFACache forwardDFACache,
+            DFACache reverseDFACache
     ) {
-        static final Cache EMPTY = new Cache(null, null);
+        static final Cache EMPTY = new Cache(null, null, null);
     }
 }

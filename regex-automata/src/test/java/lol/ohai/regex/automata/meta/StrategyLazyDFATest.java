@@ -80,7 +80,7 @@ class StrategyLazyDFATest {
             CharClasses cc = CharClassBuilder.build(nfa);
             PikeVM pikeVM = new PikeVM(nfa);
             LazyDFA lazyDFA = LazyDFA.create(nfa, cc);
-            return new Strategy.Core(pikeVM, lazyDFA, null);
+            return new Strategy.Core(pikeVM, lazyDFA, null, null);
         } catch (Exception e) {
             throw new RuntimeException("Failed: " + pattern, e);
         }
@@ -95,7 +95,7 @@ class StrategyLazyDFATest {
             PikeVM pikeVM = new PikeVM(nfa);
             LazyDFA lazyDFA = LazyDFA.create(nfa, cc);
             Prefilter prefilter = new SingleLiteral(prefix.toCharArray());
-            return new Strategy.Core(pikeVM, lazyDFA, prefilter);
+            return new Strategy.Core(pikeVM, lazyDFA, null, prefilter);
         } catch (Exception e) {
             throw new RuntimeException("Failed: " + pattern, e);
         }

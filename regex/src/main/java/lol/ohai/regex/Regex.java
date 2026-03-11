@@ -92,7 +92,7 @@ public final class Regex {
                 CharClasses charClasses = CharClassBuilder.build(nfa);
                 PikeVM pikeVM = new PikeVM(nfa);
                 LazyDFA lazyDFA = LazyDFA.create(nfa, charClasses);
-                strategy = new Strategy.Core(pikeVM, lazyDFA, prefilter);
+                strategy = new Strategy.Core(pikeVM, lazyDFA, null, prefilter);
                 namedGroups = buildNamedGroupMap(nfa);
             }
 

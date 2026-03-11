@@ -1,5 +1,8 @@
 package lol.ohai.regex.automata.meta;
 
+import lol.ohai.regex.automata.dfa.CharClassBuilder;
+import lol.ohai.regex.automata.dfa.CharClasses;
+import lol.ohai.regex.automata.dfa.lazy.LazyDFA;
 import lol.ohai.regex.automata.nfa.thompson.Compiler;
 import lol.ohai.regex.automata.nfa.thompson.NFA;
 import lol.ohai.regex.automata.nfa.thompson.pikevm.PikeVM;
@@ -79,7 +82,7 @@ class StrategyTest {
     void coreWithPrefilterFindsMatch() {
         var pikeVM = compilePikeVM("hello\\w+");
         var pf = new SingleLiteral("hello".toCharArray());
-        var strategy = new Strategy.Core(pikeVM, null, pf);
+        var strategy = new Strategy.Core(pikeVM, null, null, pf);
         var cache = strategy.createCache();
 
         var caps = strategy.search(Input.of("say helloWorld"), cache);
@@ -92,7 +95,7 @@ class StrategyTest {
     void coreWithPrefilterSkipsFalsePositive() {
         var pikeVM = compilePikeVM("hello world");
         var pf = new SingleLiteral("hello".toCharArray());
-        var strategy = new Strategy.Core(pikeVM, null, pf);
+        var strategy = new Strategy.Core(pikeVM, null, null, pf);
         var cache = strategy.createCache();
 
         var caps = strategy.search(Input.of("hello there hello world"), cache);
@@ -105,7 +108,7 @@ class StrategyTest {
     void coreWithPrefilterReturnsNullOnNoMatch() {
         var pikeVM = compilePikeVM("hello world");
         var pf = new SingleLiteral("hello".toCharArray());
-        var strategy = new Strategy.Core(pikeVM, null, pf);
+        var strategy = new Strategy.Core(pikeVM, null, null, pf);
         var cache = strategy.createCache();
 
         assertNull(strategy.search(Input.of("hello there"), cache));
@@ -114,7 +117,7 @@ class StrategyTest {
     @Test
     void coreWithoutPrefilterFallsThroughToPikeVM() {
         var pikeVM = compilePikeVM("[a-z]+");
-        var strategy = new Strategy.Core(pikeVM, null, null);
+        var strategy = new Strategy.Core(pikeVM, null, null, null);
         var cache = strategy.createCache();
 
         var caps = strategy.search(Input.of("123 abc"), cache);
@@ -126,7 +129,7 @@ class StrategyTest {
     @Test
     void coreSearchCapturesPopulatesGroups() {
         var pikeVM = compilePikeVM("(?P<word>[a-z]+)");
-        var strategy = new Strategy.Core(pikeVM, null, null);
+        var strategy = new Strategy.Core(pikeVM, null, null, null);
         var cache = strategy.createCache();
 
         var caps = strategy.searchCaptures(Input.of("123 abc"), cache);
@@ -136,7 +139,78 @@ class StrategyTest {
         assertEquals(7, caps.end(1));
     }
 
-    // -- Helper --
+    // -- Three-phase search tests --
+
+    @Test
+    void threePhaseSearchFindsCorrectStartAndEnd() throws Exception {
+        Hir hir = parseHir("[a-z]+");
+        NFA fwdNfa = Compiler.compile(hir);
+        NFA revNfa = Compiler.compileReverse(hir);
+        CharClasses fwdClasses = CharClassBuilder.build(fwdNfa);
+        CharClasses revClasses = CharClassBuilder.build(revNfa);
+        PikeVM pikeVM = new PikeVM(fwdNfa);
+        LazyDFA forwardDFA = LazyDFA.create(fwdNfa, fwdClasses);
+        LazyDFA reverseDFA = LazyDFA.create(revNfa, revClasses);
+
+        Strategy.Core strategy = new Strategy.Core(pikeVM, forwardDFA, reverseDFA, null);
+        Strategy.Cache cache = strategy.createCache();
+
+        Input input = Input.of("123 hello 456");
+        Captures caps = strategy.search(input, cache);
+        assertNotNull(caps);
+        assertEquals(4, caps.start(0));
+        assertEquals(9, caps.end(0));
+    }
+
+    @Test
+    void threePhaseSearchFallsBackWhenReverseDFANull() throws Exception {
+        Hir hir = parseHir("[a-z]+");
+        NFA fwdNfa = Compiler.compile(hir);
+        CharClasses fwdClasses = CharClassBuilder.build(fwdNfa);
+        PikeVM pikeVM = new PikeVM(fwdNfa);
+        LazyDFA forwardDFA = LazyDFA.create(fwdNfa, fwdClasses);
+
+        Strategy.Core strategy = new Strategy.Core(pikeVM, forwardDFA, null, null);
+        Strategy.Cache cache = strategy.createCache();
+
+        Input input = Input.of("123 hello 456");
+        Captures caps = strategy.search(input, cache);
+        assertNotNull(caps);
+        assertEquals(4, caps.start(0));
+        assertEquals(9, caps.end(0));
+    }
+
+    @Test
+    void threePhaseSearchCapturesNarrowsWindow() throws Exception {
+        Hir hir = parseHir("(\\d+)-(\\d+)");
+        NFA fwdNfa = Compiler.compile(hir);
+        NFA revNfa = Compiler.compileReverse(hir);
+        CharClasses fwdClasses = CharClassBuilder.build(fwdNfa);
+        CharClasses revClasses = CharClassBuilder.build(revNfa);
+        PikeVM pikeVM = new PikeVM(fwdNfa);
+        LazyDFA forwardDFA = LazyDFA.create(fwdNfa, fwdClasses);
+        LazyDFA reverseDFA = LazyDFA.create(revNfa, revClasses);
+
+        Strategy.Core strategy = new Strategy.Core(pikeVM, forwardDFA, reverseDFA, null);
+        Strategy.Cache cache = strategy.createCache();
+
+        Input input = Input.of("xxx 123-456 yyy");
+        Captures caps = strategy.searchCaptures(input, cache);
+        assertNotNull(caps);
+        assertEquals(4, caps.start(0));
+        assertEquals(11, caps.end(0));
+        assertEquals(4, caps.start(1));
+        assertEquals(7, caps.end(1));
+        assertEquals(8, caps.start(2));
+        assertEquals(11, caps.end(2));
+    }
+
+    // -- Helpers --
+
+    private static Hir parseHir(String pattern) throws Exception {
+        Ast ast = Parser.parse(pattern, 250);
+        return Translator.translate(pattern, ast);
+    }
 
     private static PikeVM compilePikeVM(String pattern) {
         try {
