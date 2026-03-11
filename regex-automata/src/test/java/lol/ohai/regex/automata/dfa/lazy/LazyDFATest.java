@@ -162,6 +162,42 @@ class LazyDFATest {
         assertEquals(6, ((SearchResult.Match) result).offset());
     }
 
+    // -- Reverse search --
+
+    @Test
+    void reverseSearchFindsMatchStart() {
+        SearchResult result = searchReverse("abc", "xxabcxx", 0, 5);
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(2, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void reverseSearchSingleChar() {
+        SearchResult result = searchReverse("a", "xxax", 0, 3);
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(2, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void reverseSearchNoMatch() {
+        SearchResult result = searchReverse("abc", "xxdefxx", 0, 7);
+        assertInstanceOf(SearchResult.NoMatch.class, result);
+    }
+
+    @Test
+    void reverseSearchCharClass() {
+        SearchResult result = searchReverse("[a-z]+", "xx hello xx", 0, 8);
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(3, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void reverseSearchAtBoundary() {
+        SearchResult result = searchReverse("abc", "abcxx", 0, 3);
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(0, ((SearchResult.Match) result).offset());
+    }
+
     // -- Helpers --
 
     private SearchResult search(String pattern, String haystack) {
@@ -180,6 +216,22 @@ class LazyDFATest {
             return LazyDFA.create(nfa, cc);
         } catch (Exception e) {
             throw new RuntimeException("Failed to compile: " + pattern, e);
+        }
+    }
+
+    private SearchResult searchReverse(String pattern, String haystack, int start, int end) {
+        try {
+            Ast ast = Parser.parse(pattern, 250);
+            Hir hir = Translator.translate(pattern, ast);
+            NFA reverseNfa = Compiler.compileReverse(hir);
+            CharClasses charClasses = CharClassBuilder.build(reverseNfa);
+            LazyDFA dfa = LazyDFA.create(reverseNfa, charClasses);
+            assertNotNull(dfa);
+            DFACache cache = dfa.createCache();
+            Input input = Input.of(haystack).withBounds(start, end, true);
+            return dfa.searchRev(input, cache);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to compile reverse: " + pattern, e);
         }
     }
 }

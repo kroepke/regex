@@ -147,6 +147,86 @@ public final class LazyDFA {
         return new SearchResult.NoMatch();
     }
 
+    /**
+     * Reverse search for the start position of the leftmost-first match.
+     *
+     * <p>Searches backwards from {@code input.end() - 1} to {@code input.start()}.
+     * Uses the same 1-char match delay as forward search. When a match-flagged
+     * state is entered at position {@code pos}, the match start is {@code pos + 1}
+     * (the char that triggered the delayed match was at {@code pos}, and the
+     * match extends from {@code pos + 1} onward in forward coordinates).</p>
+     *
+     * @param input the search input (haystack + bounds + anchored flag).
+     *              Typically anchored at the forward match's end position.
+     * @param cache per-search mutable state
+     * @return Match(startPos), NoMatch, or GaveUp(offset)
+     */
+    public SearchResult searchRev(Input input, DFACache cache) {
+        char[] haystack = input.haystack();
+        int start = input.start();
+        int end = input.end();
+        int stride = charClasses.stride();
+        int dead = DFACache.dead(stride);
+        int quit = DFACache.quit(stride);
+
+        int sid = getOrComputeStartState(input, cache);
+        if (sid == dead) return new SearchResult.NoMatch();
+        if (sid == quit) return new SearchResult.GaveUp(end);
+
+        int lastMatchStart = -1;
+
+        int pos = end - 1;
+        while (pos >= start) {
+            int classId = charClasses.classify(haystack[pos]);
+            int nextSid = cache.nextState(sid, classId);
+
+            if (nextSid > quit) {
+                sid = nextSid;
+                pos--;
+                cache.charsSearched++;
+                continue;
+            }
+
+            if (nextSid < 0) {
+                lastMatchStart = pos + 1;
+                sid = nextSid & 0x7FFF_FFFF;
+                pos--;
+                cache.charsSearched++;
+                continue;
+            }
+
+            if (nextSid == DFACache.UNKNOWN) {
+                nextSid = computeNextState(cache, sid, classId);
+                if (nextSid == quit) return new SearchResult.GaveUp(pos);
+                cache.setTransition(sid, classId, nextSid);
+                sid = nextSid;
+                if (sid < 0) {
+                    lastMatchStart = pos + 1;
+                    sid = sid & 0x7FFF_FFFF;
+                }
+                pos--;
+                cache.charsSearched++;
+                continue;
+            }
+            if (nextSid == dead) {
+                break;
+            }
+            return new SearchResult.GaveUp(pos);
+        }
+
+        // EOI: check for delayed match at left boundary
+        int rawSid = sid & 0x7FFF_FFFF;
+        if (rawSid != dead && rawSid != quit) {
+            StateContent currentContent = cache.getState(rawSid);
+            if (currentContent.isMatch()) {
+                lastMatchStart = start;
+            }
+        }
+
+        if (lastMatchStart >= 0) return new SearchResult.Match(lastMatchStart);
+        return new SearchResult.NoMatch();
+    }
+
     // -- Internal: start state --
 
     private int getOrComputeStartState(Input input, DFACache cache) {
