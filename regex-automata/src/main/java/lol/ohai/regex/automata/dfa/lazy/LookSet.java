@@ -60,4 +60,21 @@ public record LookSet(int bits) {
         return contains(LookKind.START_LINE_CRLF)
                 || contains(LookKind.END_LINE_CRLF);
     }
+
+    /**
+     * Returns true if this set contains any look-assertion kind that the
+     * lazy DFA cannot handle.  The DFA only has ASCII word-char tables, so
+     * Unicode word boundaries and special Unicode word-start/end kinds are
+     * unsupported.  CRLF-aware line anchors are also unsupported.
+     */
+    public boolean containsUnsupportedByDFA() {
+        return contains(LookKind.WORD_BOUNDARY_UNICODE)
+                || contains(LookKind.WORD_BOUNDARY_UNICODE_NEGATE)
+                || contains(LookKind.WORD_START_UNICODE)
+                || contains(LookKind.WORD_END_UNICODE)
+                || contains(LookKind.WORD_START_HALF_UNICODE)
+                || contains(LookKind.WORD_END_HALF_UNICODE)
+                || contains(LookKind.START_LINE_CRLF)
+                || contains(LookKind.END_LINE_CRLF);
+    }
 }

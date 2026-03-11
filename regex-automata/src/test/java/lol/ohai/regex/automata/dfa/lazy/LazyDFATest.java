@@ -11,6 +11,8 @@ import lol.ohai.regex.syntax.hir.Hir;
 import lol.ohai.regex.syntax.hir.Translator;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class LazyDFATest {
@@ -130,14 +132,112 @@ class LazyDFATest {
         assertInstanceOf(SearchResult.NoMatch.class, result);
     }
 
-    // -- Look-assertion bailout --
+    // -- Look-assertion DFA --
 
     @Test
-    void lookAssertionPatternReturnsNull() {
-        // Pattern with ^ should bail out
-        assertNull(buildDFA("^abc"));
-        assertNull(buildDFA("abc$"));
-        assertNull(buildDFA("\\bword\\b"));
+    void noBailOutForSupportedLookAssertionPatterns() {
+        // DFA handles text/line anchors and ASCII word boundaries
+        for (String pattern : List.of("^abc", "abc$", "(?-u:\\b)foo(?-u:\\b)", "(?-u:\\B)inner(?-u:\\B)")) {
+            assertNotNull(buildDFA(pattern), "DFA should not bail out for: " + pattern);
+        }
+    }
+
+    @Test
+    void bailsOutForUnicodeWordBoundary() {
+        // Unicode word boundaries require Unicode word-char tables the DFA lacks
+        for (String pattern : List.of("\\bfoo\\b", "\\Binner\\B")) {
+            assertNull(buildDFA(pattern), "DFA should bail out for: " + pattern);
+        }
+    }
+
+    @Test
+    void lookAssertionFreePatternUnchanged() {
+        var dfa = buildDFA("[a-z]+");
+        assertNotNull(dfa);
+        var cache = dfa.createCache();
+        var result = dfa.searchFwd(Input.of("123 hello"), cache);
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(9, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void forwardSearchWithStartTextAnchor() {
+        // Pattern: ^abc — should match only at position 0
+        var result = search("^abc", "abcdef");
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(3, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void startTextAnchorDoesNotMatchMidString() {
+        var result = search("^abc", "xabc");
+        assertInstanceOf(SearchResult.NoMatch.class, result);
+    }
+
+    @Test
+    void forwardSearchWithEndAnchor() {
+        // Pattern: abc$
+        var result = search("abc$", "xyzabc");
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(6, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void forwardSearchWithWordBoundary() {
+        // ASCII word boundary: (?-u:\b)word(?-u:\b)
+        var result = search("(?-u:\\b)word(?-u:\\b)", "a word here");
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(6, ((SearchResult.Match) result).offset());  // "word" ends at 6
+    }
+
+    @Test
+    void forwardSearchWithWordBoundaryAtInputStart() {
+        // (?-u:\b)foo at start of input
+        var result = search("(?-u:\\b)foo", "foobar");
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(3, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void forwardSearchWithWordBoundaryNoMatch() {
+        // (?-u:\b)ord(?-u:\b) should not match within a word
+        var result = search("(?-u:\\b)ord(?-u:\\b)", "word");
+        assertInstanceOf(SearchResult.NoMatch.class, result);
+    }
+
+    @Test
+    void forwardSearchWithNegatedWordBoundary() {
+        // (?-u:\B)ord — matches 'ord' when NOT at word boundary
+        var result = search("(?-u:\\B)ord", "word");
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(4, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void multilineStartLineForwardSearch() {
+        // (?m)^bar$ — multiline: ^ matches after \n
+        var result = search("(?m)^bar$", "foo\nbar\n");
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(7, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void multilineCaretMatchesAfterNewline() {
+        // (?m)^ matches at pos 0 and after each \n
+        var result = search("(?m)^[a-z]+", "abc\ndef\nghi");
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(3, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void wordBoundaryEmptyMatch() {
+        // ASCII \b matches at word boundary
+        var dfa = buildDFA("(?-u:\\b)");
+        assertNotNull(dfa);
+        var cache = dfa.createCache();
+        var result = dfa.searchFwd(Input.of("hello world"), cache);
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(0, ((SearchResult.Match) result).offset());
     }
 
     @Test

@@ -1,8 +1,10 @@
 package lol.ohai.regex.automata.dfa;
 
+import lol.ohai.regex.automata.dfa.lazy.LookSet;
 import lol.ohai.regex.automata.nfa.thompson.NFA;
 import lol.ohai.regex.automata.nfa.thompson.State;
 import lol.ohai.regex.automata.nfa.thompson.Transition;
+import lol.ohai.regex.syntax.hir.LookKind;
 import java.util.*;
 
 public final class CharClassBuilder {
@@ -27,6 +29,31 @@ public final class CharClassBuilder {
                     }
                 }
                 default -> {}
+            }
+        }
+
+        // Force boundaries for characters that look-assertions depend on.
+        // Without these, \n, \r, and word chars may collapse into a single
+        // class whose representative doesn't reflect the actual char type.
+        LookSet lookSetAny = nfa.lookSetAny();
+        if (!lookSetAny.isEmpty()) {
+            // Line terminators: needed for ^, $, START_LINE, END_LINE, etc.
+            boundaries.add((int) '\n');
+            boundaries.add((int) '\n' + 1);
+            boundaries.add((int) '\r');
+            boundaries.add((int) '\r' + 1);
+
+            if (lookSetAny.containsWord()) {
+                // Word char boundaries: [0-9A-Za-z_]
+                // Force boundaries at the edges of each word-char range
+                boundaries.add((int) '0');
+                boundaries.add((int) '9' + 1);
+                boundaries.add((int) 'A');
+                boundaries.add((int) 'Z' + 1);
+                boundaries.add((int) '_');
+                boundaries.add((int) '_' + 1);
+                boundaries.add((int) 'a');
+                boundaries.add((int) 'z' + 1);
             }
         }
 

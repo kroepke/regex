@@ -5,6 +5,7 @@ import lol.ohai.regex.automata.nfa.thompson.NFA;
 import lol.ohai.regex.automata.nfa.thompson.State;
 import lol.ohai.regex.automata.nfa.thompson.Transition;
 import lol.ohai.regex.automata.util.Input;
+import lol.ohai.regex.syntax.hir.LookKind;
 
 import java.util.Arrays;
 
@@ -25,8 +26,12 @@ import java.util.Arrays;
  * Match state, causing the destination to become effectively dead. This
  * ensures the search terminates after finding the leftmost-first match.</p>
  *
- * <p>Patterns containing look-assertions ({@code ^}, {@code $}, {@code \b}, etc.)
- * are not supported. Use {@link #create} which returns {@code null} for such patterns.</p>
+ * <p>Look-assertions ({@code ^}, {@code $}, {@code \b}, etc.) are handled by
+ * encoding look-behind context ({@code lookHave}, {@code lookNeed},
+ * {@code isFromWord}, {@code isHalfCrlf}) in the DFA state key. The epsilon
+ * closure conditionally follows {@link State.Look} transitions based on which
+ * assertions are currently satisfied. When a pattern has no look-assertions,
+ * the fast path is identical to the look-free case with zero overhead.</p>
  */
 public final class LazyDFA {
 
@@ -36,18 +41,23 @@ public final class LazyDFA {
 
     private final NFA nfa;
     private final CharClasses charClasses;
+    private final LookSet lookSetAny;
 
     private LazyDFA(NFA nfa, CharClasses charClasses) {
         this.nfa = nfa;
         this.charClasses = charClasses;
+        this.lookSetAny = nfa.lookSetAny();
     }
 
     /**
-     * Creates a LazyDFA for the given NFA, or returns {@code null} if the NFA
-     * contains look-assertion states which the lazy DFA cannot handle.
+     * Creates a LazyDFA for the given NFA, or {@code null} if the NFA
+     * contains look-assertion kinds that the DFA cannot handle (e.g.
+     * Unicode word boundaries, CRLF-aware line anchors).
      */
     public static LazyDFA create(NFA nfa, CharClasses charClasses) {
-        if (hasLookStates(nfa)) return null;
+        if (nfa.lookSetAny().containsUnsupportedByDFA()) {
+            return null;
+        }
         return new LazyDFA(nfa, charClasses);
     }
 
@@ -80,10 +90,6 @@ public final class LazyDFA {
         if (sid == quit) return new SearchResult.GaveUp(pos);
 
         int lastMatchEnd = -1;
-
-        // Start state is NEVER a match state with 1-char match delay.
-        // (The start state's match flag is carried to the first transition's
-        //  destination state instead.)
 
         while (pos < end) {
             int classId = charClasses.classify(haystack[pos]);
@@ -131,14 +137,14 @@ public final class LazyDFA {
             return new SearchResult.GaveUp(pos);
         }
 
-        // EOI transition: check if the current state has a delayed match
-        // that should be reported at end-of-input.
-        // With 1-char delay, if the current state's StateContent has isMatch=true,
-        // it means there's a pending match that should be reported at EOI.
+        // EOI transition: compute next state with EOI class to resolve
+        // look-ahead assertions (END_TEXT, END_LINE) at end-of-input.
         int rawSid = sid & 0x7FFF_FFFF;
         if (rawSid != dead && rawSid != quit) {
-            StateContent currentContent = cache.getState(rawSid);
-            if (currentContent.isMatch()) {
+            int eoiClassId = charClasses.eoiClass();
+            int eoiSid = computeNextState(cache, rawSid, eoiClassId);
+            if (eoiSid < 0) {
+                // Match-flagged result from EOI
                 lastMatchEnd = end;
             }
         }
@@ -214,11 +220,13 @@ public final class LazyDFA {
             return new SearchResult.GaveUp(pos);
         }
 
-        // EOI: check for delayed match at left boundary
+        // EOI: compute next state with EOI class to resolve look-ahead
+        // assertions at left boundary.
         int rawSid = sid & 0x7FFF_FFFF;
         if (rawSid != dead && rawSid != quit) {
-            StateContent currentContent = cache.getState(rawSid);
-            if (currentContent.isMatch()) {
+            int eoiClassId = charClasses.eoiClass();
+            int eoiSid = computeNextState(cache, rawSid, eoiClassId);
+            if (eoiSid < 0) {
                 lastMatchStart = start;
             }
         }
@@ -230,34 +238,48 @@ public final class LazyDFA {
     // -- Internal: start state --
 
     private int getOrComputeStartState(Input input, DFACache cache) {
-        if (input.isAnchored()) {
-            if (cache.startAnchored == DFACache.UNKNOWN) {
-                cache.startAnchored = computeStartState(nfa.startAnchored(), cache);
+        if (lookSetAny.isEmpty()) {
+            // Fast path: no look-assertions, use simple anchored/unanchored
+            if (input.isAnchored()) {
+                if (cache.startAnchored == DFACache.UNKNOWN) {
+                    cache.startAnchored = computeStartState(nfa.startAnchored(),
+                            cache, LookSet.EMPTY, false, false);
+                }
+                return cache.startAnchored;
+            } else {
+                if (cache.startUnanchored == DFACache.UNKNOWN) {
+                    cache.startUnanchored = computeStartState(nfa.startUnanchored(),
+                            cache, LookSet.EMPTY, false, false);
+                }
+                return cache.startUnanchored;
             }
-            return cache.startAnchored;
-        } else {
-            if (cache.startUnanchored == DFACache.UNKNOWN) {
-                cache.startUnanchored = computeStartState(nfa.startUnanchored(), cache);
-            }
-            return cache.startUnanchored;
         }
+
+        // Look-assertion path: classify start position
+        Start start = Start.from(input.haystack(), input.start());
+        int existing = cache.getStartState(start, input.isAnchored());
+        if (existing != DFACache.UNKNOWN) return existing;
+
+        int nfaStartId = input.isAnchored() ? nfa.startAnchored() : nfa.startUnanchored();
+        LookSet initialLookHave = start.initialLookHave(lookSetAny, nfa.isReverse());
+        int sid = computeStartState(nfaStartId, cache, initialLookHave,
+                start.isFromWord(), start.isHalfCrlf(nfa.isReverse()));
+        cache.setStartState(start, input.isAnchored(), sid);
+        return sid;
     }
 
-    private int computeStartState(int nfaStartId, DFACache cache) {
-        // Compute epsilon closure of the NFA start state.
-        // The start state is never a match state (matches are delayed by 1 char).
-        // We still record whether Match NFA states are present in the StateContent
-        // so that computeNextState can detect and delay them.
+    private int computeStartState(int nfaStartId, DFACache cache,
+                                   LookSet lookHave, boolean isFromWord, boolean isHalfCrlf) {
         cache.nfaStateSet.clear();
-        boolean hasMatch = epsilonClosure(cache, nfaStartId);
+        cache.closureLookNeed = 0;
+        boolean hasMatch = epsilonClosure(cache, nfaStartId, lookHave);
         int[] nfaStates = collectSorted(cache);
         if (nfaStates.length == 0) return DFACache.dead(charClasses.stride());
 
-        // hasMatch is stored in StateContent for use during transition computation,
-        // but the DFA state ID itself is NOT flagged as a match (delay by 1).
-        StateContent content = new StateContent(nfaStates, hasMatch);
+        StateContent content = new StateContent(nfaStates, hasMatch,
+                isFromWord, isHalfCrlf, lookHave.bits(), cache.closureLookNeed);
         int sid = cache.allocateState(content);
-        // Strip the match flag from the state ID — start states must not be match states.
+        // Strip the match flag — start states must not be match states (delay by 1).
         return sid & 0x7FFF_FFFF;
     }
 
@@ -266,81 +288,132 @@ public final class LazyDFA {
     /**
      * Compute the next DFA state from source state on the given class ID.
      *
-     * <p>Implements 1-char match delay with leftmost-first semantics:
-     * <ol>
-     *   <li>If the source state contains an NFA Match state, mark the
-     *       destination as a match state.</li>
-     *   <li>For leftmost-first: once a Match NFA state is encountered while
-     *       iterating source NFA states, stop adding more NFA states. This
-     *       causes the destination to become effectively dead (no outgoing
-     *       char transitions), ensuring the search terminates.</li>
-     * </ol>
-     *
-     * <p>NFA states in the source are iterated in sorted (ascending ID) order.
-     * Char-consuming states (CharRange, Sparse) that appear before the Match
-     * state in sort order still have their transitions followed, which allows
-     * greedy match extension.</p>
+     * <p>Implements two-phase look computation and 1-char match delay with
+     * leftmost-first semantics. Phase 1 resolves look-ahead assertions on the
+     * source state (before char transitions). Phase 2 computes look-behind
+     * context on the destination state (after char transitions).</p>
      */
     private int computeNextState(DFACache cache, int sourceSid, int classId) {
         int rawSourceId = sourceSid & 0x7FFF_FFFF;
         StateContent sourceContent = cache.getState(rawSourceId);
 
         cache.nfaStateSet.clear();
+        cache.closureLookNeed = 0;
         boolean isMatch = false;
 
+        // Phase 1: Look-ahead resolution on source state
+        int[] sourceNfaStates = sourceContent.nfaStates();
+        LookSet lookHave;
+        if (!lookSetAny.isEmpty()) {
+            lookHave = computeLookAhead(sourceContent, classId);
+
+            // Re-computation check: if new assertions became true that the source
+            // state needed, re-run epsilon closure with updated lookHave
+            LookSet newlyTrue = lookHave.subtract(new LookSet(sourceContent.lookHave()))
+                                        .intersect(new LookSet(sourceContent.lookNeed()));
+            if (!newlyTrue.isEmpty()) {
+                for (int nfaStateId : sourceNfaStates) {
+                    epsilonClosure(cache, nfaStateId, lookHave);
+                }
+                sourceNfaStates = collectSorted(cache);
+                cache.nfaStateSet.clear();
+                cache.closureLookNeed = 0;
+            }
+        } else {
+            lookHave = LookSet.EMPTY;
+        }
+
+        // EOI handling (AFTER look-ahead re-computation)
         if (classId == charClasses.eoiClass()) {
-            // EOI: the only thing that matters is whether the source state
-            // contains a Match NFA state (delayed match at end-of-input).
-            if (sourceContent.isMatch()) {
-                // Return a match-flagged dead state
+            // Check source for match (delayed match at end-of-input)
+            // We need to check the possibly re-computed sourceNfaStates for Match
+            boolean hasMatch = sourceContent.isMatch();
+            if (!hasMatch) {
+                // Check re-computed states for Match (may have become reachable
+                // after look-ahead resolved new assertions)
+                for (int nfaStateId : sourceNfaStates) {
+                    if (nfa.state(nfaStateId) instanceof State.Match) {
+                        hasMatch = true;
+                        break;
+                    }
+                }
+            }
+            if (hasMatch) {
                 return DFACache.dead(charClasses.stride()) | DFACache.MATCH_FLAG;
             }
             return DFACache.dead(charClasses.stride());
         }
 
-        // Iterate source NFA states in sorted order.
-        // For leftmost-first: once we see a Match NFA state, we mark the
+        // Phase 2: Compute destination look-behind context from classId.
+        // This must happen BEFORE the char-transition loop because the epsilon
+        // closure of destination NFA states needs the destination's lookHave
+        // (not the source's look-ahead).
+        boolean destIsFromWord = false;
+        boolean destIsHalfCrlf = false;
+        int destLookHave = 0;
+        LookSet destLookHaveSet = LookSet.EMPTY;
+
+        if (!lookSetAny.isEmpty()) {
+            boolean isLF = charClasses.isLineLF(classId);
+            boolean isCR = charClasses.isLineCR(classId);
+            boolean isWord = charClasses.isWordClass(classId);
+            boolean reverse = nfa.isReverse();
+
+            // START_LINE: previous char was \n
+            if (isLF) {
+                destLookHave |= LookKind.START_LINE.asBit();
+            }
+            // START_LINE_CRLF: depends on direction
+            if ((reverse && isCR) || (!reverse && isLF)) {
+                destLookHave |= LookKind.START_LINE_CRLF.asBit();
+            }
+            // WORD_START_HALF: previous char was not a word char
+            if (!isWord) {
+                destLookHave |= LookKind.WORD_START_HALF_ASCII.asBit()
+                              | LookKind.WORD_START_HALF_UNICODE.asBit();
+            }
+            destIsFromWord = isWord;
+            destIsHalfCrlf = reverse ? isLF : isCR;
+            destLookHaveSet = new LookSet(destLookHave);
+        }
+
+        // Char-transition loop: iterate source NFA states in sorted order.
+        // Epsilon closures use the DESTINATION's lookHave for correct look-
+        // assertion resolution in the destination state.
+        // For leftmost-first: once we see a Match NFA state, mark the
         // destination as a match and stop processing further NFA states.
-        for (int nfaStateId : sourceContent.nfaStates()) {
+        for (int nfaStateId : sourceNfaStates) {
             State state = nfa.state(nfaStateId);
             switch (state) {
                 case State.CharRange cr -> {
                     if (charInRange(classId, cr.start(), cr.end())) {
-                        epsilonClosure(cache, cr.next());
+                        epsilonClosure(cache, cr.next(), destLookHaveSet);
                     }
                 }
                 case State.Sparse sp -> {
                     for (Transition t : sp.transitions()) {
                         if (charInRange(classId, t.start(), t.end())) {
-                            epsilonClosure(cache, t.next());
+                            epsilonClosure(cache, t.next(), destLookHaveSet);
                             break;
                         }
                     }
                 }
                 case State.Match ignored -> {
-                    // 1-char match delay: the SOURCE state has a Match,
-                    // so the DESTINATION state gets the match flag.
                     isMatch = true;
-                    // Leftmost-first: stop processing further NFA states.
-                    // NFA states with higher IDs than Match are skipped,
-                    // making the destination state effectively dead after
-                    // this match is recorded.
                     break;
                 }
                 default -> {
-                    // Non-char-consuming states (Union, Capture, Fail)
+                    // Non-char-consuming states (Union, Capture, Look, Fail)
                     // are resolved during epsilon closure and have no char
                     // transitions. They may appear in the set but are no-ops here.
                 }
             }
-            // If we found a match (leftmost-first break), exit the outer loop
             if (isMatch) break;
         }
 
         int[] nfaStates = collectSorted(cache);
 
-        // If the destination has NFA states, check if any of them is a Match
-        // (for the StateContent's isMatch flag, used in future transitions).
+        // Check if destination NFA states include a Match
         boolean destHasMatch = false;
         for (int nfaStateId : nfaStates) {
             if (nfa.state(nfaStateId) instanceof State.Match) {
@@ -353,17 +426,82 @@ public final class LazyDFA {
             return DFACache.dead(charClasses.stride());
         }
         if (nfaStates.length == 0 && isMatch) {
-            // Match-flagged dead: the destination has no NFA states but IS a match.
-            // We use the dead state ID with the match flag.
             return DFACache.dead(charClasses.stride()) | DFACache.MATCH_FLAG;
         }
 
-        StateContent content = new StateContent(nfaStates, destHasMatch);
+        StateContent content = new StateContent(nfaStates, destHasMatch,
+                destIsFromWord, destIsHalfCrlf, destLookHave, cache.closureLookNeed);
         int sid = allocateOrGiveUp(cache, content);
         if (isMatch) {
             sid = sid | DFACache.MATCH_FLAG;
         }
         return sid;
+    }
+
+    /**
+     * Compute look-ahead assertions on the source state based on the input unit.
+     * These assertions fire on the transition FROM the source state.
+     */
+    private LookSet computeLookAhead(StateContent source, int classId) {
+        LookSet have = new LookSet(source.lookHave());
+
+        boolean isEoi = (classId == charClasses.eoiClass());
+        boolean isLF = !isEoi && charClasses.isLineLF(classId);
+        boolean isCR = !isEoi && charClasses.isLineCR(classId);
+        boolean isWord = !isEoi && charClasses.isWordClass(classId);
+        boolean reverse = nfa.isReverse();
+
+        // END_LINE: current unit is \n
+        if (isLF) {
+            have = have.insert(LookKind.END_LINE);
+        }
+
+        // END_LINE_CRLF: complex CRLF handling (direction-dependent)
+        if (isCR && (!reverse || !source.isHalfCrlf())) {
+            have = have.insert(LookKind.END_LINE_CRLF);
+        }
+        if (isLF && (reverse || !source.isHalfCrlf())) {
+            have = have.insert(LookKind.END_LINE_CRLF);
+        }
+
+        // END_TEXT + END_LINE + END_LINE_CRLF at EOI
+        if (isEoi) {
+            have = have.insert(LookKind.END_TEXT)
+                       .insert(LookKind.END_LINE)
+                       .insert(LookKind.END_LINE_CRLF);
+        }
+
+        // START_LINE_CRLF: source isHalfCrlf and current is NOT the completing half
+        if (source.isHalfCrlf()) {
+            boolean completing = reverse ? isCR : isLF;
+            if (!completing) {
+                have = have.insert(LookKind.START_LINE_CRLF);
+            }
+        }
+
+        // Word boundaries
+        boolean fromWord = source.isFromWord();
+        if (fromWord != isWord) {
+            have = have.insert(LookKind.WORD_BOUNDARY_ASCII)
+                       .insert(LookKind.WORD_BOUNDARY_UNICODE);
+        } else {
+            have = have.insert(LookKind.WORD_BOUNDARY_ASCII_NEGATE)
+                       .insert(LookKind.WORD_BOUNDARY_UNICODE_NEGATE);
+        }
+        if (!fromWord && isWord) {
+            have = have.insert(LookKind.WORD_START_ASCII)
+                       .insert(LookKind.WORD_START_UNICODE);
+        }
+        if (fromWord && !isWord) {
+            have = have.insert(LookKind.WORD_END_ASCII)
+                       .insert(LookKind.WORD_END_UNICODE);
+        }
+        if (!isWord) {
+            have = have.insert(LookKind.WORD_END_HALF_ASCII)
+                       .insert(LookKind.WORD_END_HALF_UNICODE);
+        }
+
+        return have;
     }
 
     /**
@@ -395,11 +533,16 @@ public final class LazyDFA {
     /**
      * Compute epsilon closure starting from the given NFA state.
      * Adds all reachable states (including char-consuming and Match states)
-     * to {@code cache.nfaStateSet}.
+     * to {@code cache.nfaStateSet}. Conditionally follows {@link State.Look}
+     * transitions based on which assertions are satisfied in {@code lookHave}.
+     *
+     * <p>Also accumulates {@code cache.closureLookNeed} — the set of all
+     * Look assertions encountered during closure (both followed and not).
+     * This is used to determine when re-computation is needed.</p>
      *
      * @return true if a Match state was reached
      */
-    private boolean epsilonClosure(DFACache cache, int startStateId) {
+    private boolean epsilonClosure(DFACache cache, int startStateId, LookSet lookHave) {
         boolean isMatch = false;
         int[] stack = cache.closureStack;
         int stackTop = 0;
@@ -429,8 +572,12 @@ public final class LazyDFA {
                     stack = ensureStackCapacity(stack, stackTop);
                     stack[stackTop++] = cap.next();
                 }
-                case State.Look ignored -> {
-                    // Should not happen -- patterns with Look bailed out.
+                case State.Look look -> {
+                    cache.closureLookNeed |= look.look().asBit();
+                    if (lookHave.contains(look.look())) {
+                        stack = ensureStackCapacity(stack, stackTop);
+                        stack[stackTop++] = look.next();
+                    }
                 }
                 case State.Fail ignored -> { /* dead end */ }
             }
@@ -454,13 +601,5 @@ public final class LazyDFA {
         }
         Arrays.sort(result);
         return result;
-    }
-
-    /** Check if any NFA state is a Look state. */
-    private static boolean hasLookStates(NFA nfa) {
-        for (int i = 0; i < nfa.stateCount(); i++) {
-            if (nfa.state(i) instanceof State.Look) return true;
-        }
-        return false;
     }
 }

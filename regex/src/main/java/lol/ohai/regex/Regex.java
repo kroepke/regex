@@ -93,8 +93,6 @@ public final class Regex {
                 PikeVM pikeVM = new PikeVM(nfa);
                 LazyDFA forwardDFA = LazyDFA.create(nfa, charClasses);
 
-                // Build reverse DFA only when forward DFA is available (both bail
-                // out on the same condition: look-assertion states in the NFA).
                 LazyDFA reverseDFA = null;
                 if (forwardDFA != null) {
                     NFA reverseNfa = Compiler.compileReverse(hir);
