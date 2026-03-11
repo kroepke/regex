@@ -79,7 +79,7 @@ class StrategyTest {
     void coreWithPrefilterFindsMatch() {
         var pikeVM = compilePikeVM("hello\\w+");
         var pf = new SingleLiteral("hello".toCharArray());
-        var strategy = new Strategy.Core(pikeVM, pf);
+        var strategy = new Strategy.Core(pikeVM, null, pf);
         var cache = strategy.createCache();
 
         var caps = strategy.search(Input.of("say helloWorld"), cache);
@@ -92,7 +92,7 @@ class StrategyTest {
     void coreWithPrefilterSkipsFalsePositive() {
         var pikeVM = compilePikeVM("hello world");
         var pf = new SingleLiteral("hello".toCharArray());
-        var strategy = new Strategy.Core(pikeVM, pf);
+        var strategy = new Strategy.Core(pikeVM, null, pf);
         var cache = strategy.createCache();
 
         var caps = strategy.search(Input.of("hello there hello world"), cache);
@@ -105,7 +105,7 @@ class StrategyTest {
     void coreWithPrefilterReturnsNullOnNoMatch() {
         var pikeVM = compilePikeVM("hello world");
         var pf = new SingleLiteral("hello".toCharArray());
-        var strategy = new Strategy.Core(pikeVM, pf);
+        var strategy = new Strategy.Core(pikeVM, null, pf);
         var cache = strategy.createCache();
 
         assertNull(strategy.search(Input.of("hello there"), cache));
@@ -114,7 +114,7 @@ class StrategyTest {
     @Test
     void coreWithoutPrefilterFallsThroughToPikeVM() {
         var pikeVM = compilePikeVM("[a-z]+");
-        var strategy = new Strategy.Core(pikeVM, null);
+        var strategy = new Strategy.Core(pikeVM, null, null);
         var cache = strategy.createCache();
 
         var caps = strategy.search(Input.of("123 abc"), cache);
@@ -126,7 +126,7 @@ class StrategyTest {
     @Test
     void coreSearchCapturesPopulatesGroups() {
         var pikeVM = compilePikeVM("(?P<word>[a-z]+)");
-        var strategy = new Strategy.Core(pikeVM, null);
+        var strategy = new Strategy.Core(pikeVM, null, null);
         var cache = strategy.createCache();
 
         var caps = strategy.searchCaptures(Input.of("123 abc"), cache);
