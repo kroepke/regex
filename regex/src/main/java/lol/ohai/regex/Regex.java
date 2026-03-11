@@ -91,8 +91,14 @@ public final class Regex {
                 NFA nfa = Compiler.compile(hir);
                 CharClasses charClasses = CharClassBuilder.build(nfa);
                 PikeVM pikeVM = new PikeVM(nfa);
-                LazyDFA lazyDFA = LazyDFA.create(nfa, charClasses);
-                strategy = new Strategy.Core(pikeVM, lazyDFA, null, prefilter);
+                LazyDFA forwardDFA = LazyDFA.create(nfa, charClasses);
+
+                // Build reverse DFA for start-position finding
+                NFA reverseNfa = Compiler.compileReverse(hir);
+                CharClasses reverseCharClasses = CharClassBuilder.build(reverseNfa);
+                LazyDFA reverseDFA = LazyDFA.create(reverseNfa, reverseCharClasses);
+
+                strategy = new Strategy.Core(pikeVM, forwardDFA, reverseDFA, prefilter);
                 namedGroups = buildNamedGroupMap(nfa);
             }
 
