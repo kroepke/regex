@@ -137,7 +137,7 @@ class BuilderTest {
         int s3 = builder.add(new State.Match(0));
         builder.setStartAnchored(s0);
         builder.setStartUnanchored(s0);
-        builder.setGroupInfo(1, 2, List.of((String) null));
+        builder.setGroupInfo(1, 2, Arrays.asList((String) null));
         NFA nfa = builder.build();
 
         assertTrue(nfa.lookSetAny().contains(LookKind.START_TEXT));
@@ -151,7 +151,7 @@ class BuilderTest {
         builder.add(new State.Match(0));
         builder.setStartAnchored(0);
         builder.setStartUnanchored(0);
-        builder.setGroupInfo(1, 2, List.of((String) null));
+        builder.setGroupInfo(1, 2, Arrays.asList((String) null));
         NFA nfa = builder.build();
 
         assertTrue(nfa.lookSetAny().isEmpty());
