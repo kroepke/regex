@@ -130,13 +130,13 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
             SearchResult fwdResult = forwardDFA.searchFwd(input, cache.forwardDFACache());
             return switch (fwdResult) {
                 case SearchResult.Match m -> {
-                    int matchEnd = m.offset();
-                    // Bound the search window using the forward DFA's match end.
-                    // The PikeVM determines the exact match with correct semantics (lazy
-                    // quantifiers, alternation preference). The reverse DFA is not used here
-                    // because its start-position hint may be incorrect for patterns where the
-                    // forward DFA overestimates the match end.
-                    Input narrowed = input.withBounds(input.start(), matchEnd, input.isAnchored());
+                    // Forward DFA narrows the search window. PikeVM finds the exact
+                    // match with correct semantics (lazy quantifiers, alternation
+                    // preference). The reverse DFA is not used here because the forward
+                    // DFA may overestimate the match end for lazy/empty-alternative
+                    // patterns, which would cause the reverse DFA to compute an
+                    // incorrect start position.
+                    Input narrowed = input.withBounds(input.start(), m.offset(), input.isAnchored());
                     yield pikeVM.search(narrowed, cache.pikeVMCache());
                 }
                 case SearchResult.NoMatch n -> null;
@@ -148,11 +148,7 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
             SearchResult fwdResult = forwardDFA.searchFwd(input, cache.forwardDFACache());
             return switch (fwdResult) {
                 case SearchResult.Match m -> {
-                    int matchEnd = m.offset();
-                    // Bound the search window using the forward DFA's match end, then run
-                    // the PikeVM for exact semantics. The reverse DFA hint is not used as
-                    // the PikeVM anchor because the forward DFA may overestimate the end.
-                    Input narrowed = input.withBounds(input.start(), matchEnd, input.isAnchored());
+                    Input narrowed = input.withBounds(input.start(), m.offset(), input.isAnchored());
                     yield pikeVM.searchCaptures(narrowed, cache.pikeVMCache());
                 }
                 case SearchResult.NoMatch n -> null;
