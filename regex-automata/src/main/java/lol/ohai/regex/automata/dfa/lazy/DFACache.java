@@ -19,6 +19,10 @@ public final class DFACache {
     int startUnanchored = UNKNOWN;
     int startAnchored = UNKNOWN;
 
+    int[] startStates;  // [Start.COUNT * 2] slots: [0..4] unanchored, [5..9] anchored
+
+    int closureLookNeed;  // accumulates lookNeed during epsilon closure, reset by caller
+
     final SparseSet nfaStateSet;
     int[] closureStack;  // may grow during epsilon closure
 
@@ -42,6 +46,7 @@ public final class DFACache {
         this.stateMap = new HashMap<>();
         this.nfaStateSet = new SparseSet(Math.max(1, nfaStateCount));
         this.closureStack = new int[Math.max(1, nfaStateCount) * 2];
+        this.startStates = new int[Start.COUNT * 2];
         initSentinels();
     }
 
@@ -86,6 +91,16 @@ public final class DFACache {
     public int clearCount() { return clearCount; }
     public int stride() { return stride; }
 
+    public int getStartState(Start start, boolean anchored) {
+        int idx = anchored ? Start.COUNT + start.ordinal() : start.ordinal();
+        return startStates[idx];
+    }
+
+    public void setStartState(Start start, boolean anchored, int sid) {
+        int idx = anchored ? Start.COUNT + start.ordinal() : start.ordinal();
+        startStates[idx] = sid;
+    }
+
     public void clear(StateContent preserve) {
         Arrays.fill(transTable, 0);
         states.clear();
@@ -96,6 +111,7 @@ public final class DFACache {
         }
         startUnanchored = UNKNOWN;
         startAnchored = UNKNOWN;
+        Arrays.fill(startStates, UNKNOWN);
         clearCount++;
         charsSearched = 0;
         statesCreated = 0;
