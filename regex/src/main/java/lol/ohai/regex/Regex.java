@@ -4,6 +4,9 @@ import lol.ohai.regex.automata.meta.MultiLiteral;
 import lol.ohai.regex.automata.meta.Prefilter;
 import lol.ohai.regex.automata.meta.SingleLiteral;
 import lol.ohai.regex.automata.meta.Strategy;
+import lol.ohai.regex.automata.dfa.CharClassBuilder;
+import lol.ohai.regex.automata.dfa.CharClasses;
+import lol.ohai.regex.automata.dfa.lazy.LazyDFA;
 import lol.ohai.regex.automata.nfa.thompson.BuildError;
 import lol.ohai.regex.automata.nfa.thompson.Compiler;
 import lol.ohai.regex.automata.nfa.thompson.NFA;
@@ -86,8 +89,10 @@ public final class Regex {
                 namedGroups = Collections.emptyMap();
             } else {
                 NFA nfa = Compiler.compile(hir);
+                CharClasses charClasses = CharClassBuilder.build(nfa);
                 PikeVM pikeVM = new PikeVM(nfa);
-                strategy = new Strategy.Core(pikeVM, prefilter);
+                LazyDFA lazyDFA = LazyDFA.create(nfa, charClasses);
+                strategy = new Strategy.Core(pikeVM, lazyDFA, prefilter);
                 namedGroups = buildNamedGroupMap(nfa);
             }
 
