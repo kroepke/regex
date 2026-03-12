@@ -888,6 +888,12 @@ package lol.ohai.regex.automata.nfa.thompson.backtrack;
 
 **Important:** Do NOT run anchored searches on `[expectedStart, expectedEnd]` — that gives trivially correct results and tests nothing about the engine's actual search capability. The test must prove the backtracker can find matches in full-size haystacks (up to its length limit).
 
+**Suite test specifics:**
+- `EngineCapabilities` should be `LEFTMOST_FIRST` only (no `EARLIEST`, no `ALL`)
+- Blacklist `expensive/backtrack-blow-visited-capacity` by name (not just by `maxHaystackLen` check)
+- Char-to-byte offset conversion helpers: share or copy from `PikeVMSuiteTest`
+- Same skip conditions: multi-pattern, non-UTF-8, case-insensitive, regex-lite group, bounds-inside-codepoint
+
 - [ ] **Step 2: Run suite tests**
 
 Run: `./mvnw test -pl regex-automata -Dtest="BoundedBacktrackerSuiteTest"`
@@ -968,17 +974,32 @@ private Captures captureEngine(Input narrowed, Cache cache) {
 }
 ```
 
-Update all `pikeVM.searchCaptures(narrowed, cache.pikeVMCache())` calls in `dfaSearchCapturesReverse()` to use `captureEngine(narrowed, cache)` instead. This is the key integration point — the three-phase search now uses backtracker on the narrowed window.
+Update `pikeVM.searchCaptures(narrowed, cache.pikeVMCache())` calls in `dfaSearchCapturesReverse()` to use `captureEngine(narrowed, cache)` **only** for the narrowed, anchored path (the `SearchResult.Match rm` case). The GaveUp fallback path must continue using `pikeVM.searchCaptures()` directly because its input may be unanchored, and the backtracker's `searchCaptures()` is anchored-only (`nfa.startAnchored()`).
+
+Specifically, only this call changes:
+```java
+case SearchResult.Match rm -> {
+    Input narrowed = input.withBounds(rm.offset(), matchEnd, true);
+    yield captureEngine(narrowed, cache);  // <-- backtracker OK: anchored, narrowed
+}
+```
+
+The GaveUp and top-level GaveUp cases keep using `pikeVM.searchCaptures()` directly.
 
 - [ ] **Step 3: Update Regex.create() to build the backtracker**
 
+Inside the `else` branch of `Regex.create()` (the branch that builds the full engine, NOT the `PrefilterOnly` path), add backtracker construction alongside the existing PikeVM/DFA creation:
+
 ```java
+// Inside the else branch (lines 90-105):
 NFA nfa = Compiler.compile(hir);
 // ... existing DFA creation ...
 BoundedBacktracker backtracker = new BoundedBacktracker(nfa);
 
 strategy = new Strategy.Core(pikeVM, forwardDFA, reverseDFA, prefilter, backtracker);
 ```
+
+Also add import: `import lol.ohai.regex.automata.nfa.thompson.backtrack.BoundedBacktracker;`
 
 - [ ] **Step 4: Run all tests**
 
