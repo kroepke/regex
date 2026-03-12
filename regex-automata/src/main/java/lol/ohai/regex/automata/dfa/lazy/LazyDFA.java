@@ -263,7 +263,17 @@ public final class LazyDFA {
             }
         }
 
-        // Look-assertion path: classify start position
+        // Look-assertion path: classify start position.
+        // If the char before the start position is a quit char, give up —
+        // we can't correctly determine look-behind context (e.g., word boundary)
+        // for non-ASCII chars like surrogates.
+        if (charClasses.hasQuitClasses() && input.start() > 0) {
+            char prev = input.haystack()[input.start() - 1];
+            int cls = charClasses.classify(prev);
+            if (charClasses.isQuitClass(cls)) {
+                return DFACache.quit(charClasses.stride());
+            }
+        }
         Start start = Start.from(input.haystack(), input.start());
         int existing = cache.getStartState(start, input.isAnchored());
         if (existing != DFACache.UNKNOWN) return existing;

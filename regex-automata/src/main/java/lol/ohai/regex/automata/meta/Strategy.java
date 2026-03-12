@@ -130,98 +130,43 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
             return pikeVM.searchCaptures(input, cache.pikeVMCache());
         }
 
+        /**
+         * Two-phase search: forward DFA narrows the window, PikeVM finds exact match.
+         *
+         * <p>The forward DFA finds a (possibly overestimated) match end. PikeVM then
+         * runs on the narrowed window to find the correct leftmost-first match. This
+         * is necessary because the DFA uses leftmost-longest semantics which can
+         * disagree with PikeVM for lazy quantifiers and empty alternatives.</p>
+         */
         private Captures dfaSearch(Input input, Cache cache) {
             SearchResult fwdResult = forwardDFA.searchFwd(input, cache.forwardDFACache());
             return switch (fwdResult) {
                 case SearchResult.NoMatch n -> null;
                 case SearchResult.GaveUp g -> pikeVM.search(input, cache.pikeVMCache());
-                case SearchResult.Match m -> dfaSearchReverse(input, cache, m.offset());
-            };
-        }
-
-        private Captures dfaSearchReverse(Input input, Cache cache, int matchEnd) {
-            // Empty match: start == end, no reverse search needed
-            if (matchEnd == input.start()) {
-                Captures caps = new Captures(1);
-                caps.set(0, matchEnd);
-                caps.set(1, matchEnd);
-                return caps;
-            }
-
-            // Anchored search: start is fixed at input.start()
-            if (input.isAnchored()) {
-                Captures caps = new Captures(1);
-                caps.set(0, input.start());
-                caps.set(1, matchEnd);
-                return caps;
-            }
-
-            // No reverse DFA: fall back to PikeVM on narrowed window
-            if (reverseDFA == null) {
-                Input narrowed = input.withBounds(input.start(), matchEnd, false);
-                return pikeVM.search(narrowed, cache.pikeVMCache());
-            }
-
-            // Three-phase: reverse DFA finds start
-            Input revInput = input.withBounds(input.start(), matchEnd, true);
-            SearchResult revResult = reverseDFA.searchRev(revInput, cache.reverseDFACache());
-            return switch (revResult) {
-                case SearchResult.Match rm -> {
-                    Captures caps = new Captures(1);
-                    caps.set(0, rm.offset());
-                    caps.set(1, matchEnd);
-                    yield caps;
-                }
-                case SearchResult.GaveUp g -> {
-                    Input narrowed = input.withBounds(input.start(), matchEnd, false);
+                case SearchResult.Match m -> {
+                    Input narrowed = input.withBounds(input.start(), m.offset(), false);
                     yield pikeVM.search(narrowed, cache.pikeVMCache());
                 }
-                case SearchResult.NoMatch n ->
-                    throw new IllegalStateException("reverse DFA found no match after forward match");
             };
         }
 
+        /**
+         * Two-phase capture search: forward DFA narrows the window, then the
+         * capture engine (backtracker or PikeVM) finds exact match with groups.
+         *
+         * <p>Like {@link #dfaSearch}, the forward DFA may overestimate matchEnd
+         * for lazy quantifiers and empty alternatives. Running the capture engine
+         * on [start, matchEnd] guarantees correct leftmost-first semantics.</p>
+         */
         private Captures dfaSearchCaptures(Input input, Cache cache) {
             SearchResult fwdResult = forwardDFA.searchFwd(input, cache.forwardDFACache());
             return switch (fwdResult) {
                 case SearchResult.NoMatch n -> null;
                 case SearchResult.GaveUp g -> pikeVM.searchCaptures(input, cache.pikeVMCache());
-                case SearchResult.Match m -> dfaSearchCapturesReverse(input, cache, m.offset());
-            };
-        }
-
-        /**
-         * After forward DFA finds matchEnd, use reverse DFA to narrow the window
-         * for the capture engine. Falls back to PikeVM on the full window if
-         * reverse DFA is unavailable or gives up.
-         */
-        private Captures dfaSearchCapturesReverse(Input input, Cache cache, int matchEnd) {
-            // Empty match or anchored: capture engine on [start, matchEnd]
-            if (matchEnd == input.start() || input.isAnchored()) {
-                Input narrowed = input.withBounds(input.start(), matchEnd, true);
-                return pikeVM.searchCaptures(narrowed, cache.pikeVMCache());
-            }
-
-            // No reverse DFA: capture engine on [start, matchEnd]
-            if (reverseDFA == null) {
-                Input narrowed = input.withBounds(input.start(), matchEnd, false);
-                return pikeVM.searchCaptures(narrowed, cache.pikeVMCache());
-            }
-
-            // Three-phase: reverse DFA finds start, then capture engine on [start, end]
-            Input revInput = input.withBounds(input.start(), matchEnd, true);
-            SearchResult revResult = reverseDFA.searchRev(revInput, cache.reverseDFACache());
-            return switch (revResult) {
-                case SearchResult.Match rm -> {
-                    Input narrowed = input.withBounds(rm.offset(), matchEnd, true);
+                case SearchResult.Match m -> {
+                    Input narrowed = input.withBounds(input.start(), m.offset(), false);
                     yield captureEngine(narrowed, cache);
                 }
-                case SearchResult.GaveUp g -> {
-                    Input narrowed = input.withBounds(input.start(), matchEnd, false);
-                    yield pikeVM.searchCaptures(narrowed, cache.pikeVMCache());
-                }
-                case SearchResult.NoMatch n ->
-                    throw new IllegalStateException("reverse DFA found no match after forward match");
             };
         }
 
