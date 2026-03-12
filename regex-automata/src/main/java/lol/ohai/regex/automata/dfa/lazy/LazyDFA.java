@@ -55,7 +55,15 @@ public final class LazyDFA {
      * Unicode word boundaries, CRLF-aware line anchors).
      */
     public static LazyDFA create(NFA nfa, CharClasses charClasses) {
-        if (nfa.lookSetAny().containsBailOutByDFA()) {
+        LookSet looks = nfa.lookSetAny();
+        // CRLF line anchors always bail — DFA can't handle them
+        if (looks.containsCrlf()) {
+            return null;
+        }
+        // Unicode word boundaries require quit chars to be configured.
+        // Without quit chars, the DFA would use ASCII word-char tables
+        // on non-ASCII input, producing incorrect results.
+        if (looks.containsUnicodeWord() && !charClasses.hasQuitClasses()) {
             return null;
         }
         return new LazyDFA(nfa, charClasses);
