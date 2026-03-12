@@ -243,10 +243,154 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
 
     record ReverseSuffix(PikeVM pikeVM, LazyDFA forwardDFA, LazyDFA reverseDFA,
                          Prefilter suffixPrefilter, BoundedBacktracker backtracker) implements Strategy {
-        @Override public Cache createCache() { throw new UnsupportedOperationException("TODO"); }
-        @Override public boolean isMatch(Input input, Cache cache) { throw new UnsupportedOperationException("TODO"); }
-        @Override public Captures search(Input input, Cache cache) { throw new UnsupportedOperationException("TODO"); }
-        @Override public Captures searchCaptures(Input input, Cache cache) { throw new UnsupportedOperationException("TODO"); }
+
+        @Override
+        public Cache createCache() {
+            return new Cache(
+                    pikeVM.createCache(),
+                    forwardDFA.createCache(),
+                    reverseDFA.createCache(),
+                    backtracker != null ? backtracker.createCache() : null,
+                    null  // prefixReverseDFACache — not used by ReverseSuffix
+            );
+        }
+
+        @Override
+        public boolean isMatch(Input input, Cache cache) {
+            if (input.isAnchored()) {
+                return pikeVM.isMatch(input, cache.pikeVMCache());
+            }
+            int start = input.start();
+            int end = input.end();
+            String haystackStr = input.haystackStr();
+            int minStart = input.start();
+
+            while (start < end) {
+                int suffixPos = suffixPrefilter.find(haystackStr, start, end);
+                if (suffixPos < 0) return false;
+
+                int reverseFrom = suffixPos + suffixPrefilter.matchLength();
+                Input reverseInput = input.withBounds(minStart, reverseFrom, true);
+                SearchResult revResult = reverseDFA.searchRev(reverseInput, cache.reverseDFACache());
+
+                switch (revResult) {
+                    case SearchResult.NoMatch n -> {
+                        minStart = reverseFrom;
+                        start = suffixPos + 1;
+                        continue;
+                    }
+                    case SearchResult.GaveUp g -> {
+                        return pikeVM.isMatch(input.withBounds(start, end, false), cache.pikeVMCache());
+                    }
+                    case SearchResult.Match m -> {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        @Override
+        public Captures search(Input input, Cache cache) {
+            if (input.isAnchored()) {
+                return pikeVM.search(input, cache.pikeVMCache());
+            }
+            int start = input.start();
+            int end = input.end();
+            String haystackStr = input.haystackStr();
+            int minStart = input.start();
+
+            while (start < end) {
+                int suffixPos = suffixPrefilter.find(haystackStr, start, end);
+                if (suffixPos < 0) return null;
+
+                int reverseFrom = suffixPos + suffixPrefilter.matchLength();
+                Input reverseInput = input.withBounds(minStart, reverseFrom, true);
+                SearchResult revResult = reverseDFA.searchRev(reverseInput, cache.reverseDFACache());
+
+                switch (revResult) {
+                    case SearchResult.NoMatch n -> {
+                        minStart = reverseFrom;
+                        start = suffixPos + 1;
+                        continue;
+                    }
+                    case SearchResult.GaveUp g -> {
+                        return pikeVM.search(input.withBounds(start, end, false), cache.pikeVMCache());
+                    }
+                    case SearchResult.Match m -> {
+                        int matchStart = m.offset();
+                        Input fwdInput = input.withBounds(matchStart, end, false);
+                        SearchResult fwdResult = forwardDFA.searchFwd(fwdInput, cache.forwardDFACache());
+
+                        switch (fwdResult) {
+                            case SearchResult.Match fm -> {
+                                Input narrowed = input.withBounds(matchStart, fm.offset(), false);
+                                return pikeVM.search(narrowed, cache.pikeVMCache());
+                            }
+                            case SearchResult.GaveUp g2 -> {
+                                return pikeVM.search(fwdInput, cache.pikeVMCache());
+                            }
+                            case SearchResult.NoMatch n2 -> {
+                                start = suffixPos + 1;
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public Captures searchCaptures(Input input, Cache cache) {
+            if (input.isAnchored()) {
+                return pikeVM.searchCaptures(input, cache.pikeVMCache());
+            }
+            int start = input.start();
+            int end = input.end();
+            String haystackStr = input.haystackStr();
+            int minStart = input.start();
+
+            while (start < end) {
+                int suffixPos = suffixPrefilter.find(haystackStr, start, end);
+                if (suffixPos < 0) return null;
+
+                int reverseFrom = suffixPos + suffixPrefilter.matchLength();
+                Input reverseInput = input.withBounds(minStart, reverseFrom, true);
+                SearchResult revResult = reverseDFA.searchRev(reverseInput, cache.reverseDFACache());
+
+                switch (revResult) {
+                    case SearchResult.NoMatch n -> {
+                        minStart = reverseFrom;
+                        start = suffixPos + 1;
+                        continue;
+                    }
+                    case SearchResult.GaveUp g -> {
+                        return pikeVM.searchCaptures(input.withBounds(start, end, false), cache.pikeVMCache());
+                    }
+                    case SearchResult.Match m -> {
+                        int matchStart = m.offset();
+                        Input fwdInput = input.withBounds(matchStart, end, false);
+                        SearchResult fwdResult = forwardDFA.searchFwd(fwdInput, cache.forwardDFACache());
+
+                        switch (fwdResult) {
+                            case SearchResult.Match fm -> {
+                                Input narrowed = input.withBounds(matchStart, fm.offset(), false);
+                                return Strategy.doCaptureEngine(narrowed, cache, pikeVM, backtracker);
+                            }
+                            case SearchResult.GaveUp g2 -> {
+                                return pikeVM.searchCaptures(fwdInput, cache.pikeVMCache());
+                            }
+                            case SearchResult.NoMatch n2 -> {
+                                start = suffixPos + 1;
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+            return null;
+        }
     }
 
     record ReverseInner(PikeVM pikeVM, LazyDFA forwardDFA, LazyDFA prefixReverseDFA,
