@@ -3,6 +3,7 @@ package lol.ohai.regex.automata.meta;
 import lol.ohai.regex.automata.dfa.lazy.DFACache;
 import lol.ohai.regex.automata.dfa.lazy.LazyDFA;
 import lol.ohai.regex.automata.dfa.lazy.SearchResult;
+import lol.ohai.regex.automata.nfa.thompson.backtrack.BoundedBacktracker;
 import lol.ohai.regex.automata.nfa.thompson.pikevm.PikeVM;
 import lol.ohai.regex.automata.util.Captures;
 import lol.ohai.regex.automata.util.Input;
@@ -35,15 +36,18 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
      * @param forwardDFA the forward lazy DFA engine, or {@code null} if not available
      * @param reverseDFA the reverse lazy DFA engine, or {@code null} if not available
      * @param prefilter  the prefilter to use, or {@code null} for pure engine search
+     * @param backtracker the bounded backtracker, or {@code null} if not available
      */
-    record Core(PikeVM pikeVM, LazyDFA forwardDFA, LazyDFA reverseDFA, Prefilter prefilter) implements Strategy {
+    record Core(PikeVM pikeVM, LazyDFA forwardDFA, LazyDFA reverseDFA,
+                Prefilter prefilter, BoundedBacktracker backtracker) implements Strategy {
 
         @Override
         public Cache createCache() {
             return new Cache(
                     pikeVM.createCache(),
                     forwardDFA != null ? forwardDFA.createCache() : null,
-                    reverseDFA != null ? reverseDFA.createCache() : null
+                    reverseDFA != null ? reverseDFA.createCache() : null,
+                    backtracker != null ? backtracker.createCache() : null
             );
         }
 
@@ -210,7 +214,7 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
             return switch (revResult) {
                 case SearchResult.Match rm -> {
                     Input narrowed = input.withBounds(rm.offset(), matchEnd, true);
-                    yield pikeVM.searchCaptures(narrowed, cache.pikeVMCache());
+                    yield captureEngine(narrowed, cache);
                 }
                 case SearchResult.GaveUp g -> {
                     Input narrowed = input.withBounds(input.start(), matchEnd, false);
@@ -219,6 +223,23 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
                 case SearchResult.NoMatch n ->
                     throw new IllegalStateException("reverse DFA found no match after forward match");
             };
+        }
+
+        /**
+         * Selects the best capture engine for the given narrowed, anchored window.
+         * Prefers the bounded backtracker for small windows (faster than PikeVM for
+         * captures); falls back to PikeVM for larger windows or when the backtracker
+         * is unavailable.
+         */
+        private Captures captureEngine(Input narrowed, Cache cache) {
+            if (backtracker != null) {
+                int windowLen = narrowed.end() - narrowed.start();
+                if (windowLen <= backtracker.maxHaystackLen()) {
+                    Captures caps = backtracker.searchCaptures(narrowed, cache.backtrackerCache());
+                    if (caps != null) return caps;
+                }
+            }
+            return pikeVM.searchCaptures(narrowed, cache.pikeVMCache());
         }
 
         private Captures prefilterLoop(Input input, Cache cache,
@@ -288,8 +309,9 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
     record Cache(
             lol.ohai.regex.automata.nfa.thompson.pikevm.Cache pikeVMCache,
             DFACache forwardDFACache,
-            DFACache reverseDFACache
+            DFACache reverseDFACache,
+            lol.ohai.regex.automata.nfa.thompson.backtrack.BoundedBacktracker.Cache backtrackerCache
     ) {
-        static final Cache EMPTY = new Cache(null, null, null);
+        static final Cache EMPTY = new Cache(null, null, null, null);
     }
 }

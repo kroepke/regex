@@ -10,6 +10,7 @@ import lol.ohai.regex.automata.dfa.lazy.LazyDFA;
 import lol.ohai.regex.automata.nfa.thompson.BuildError;
 import lol.ohai.regex.automata.nfa.thompson.Compiler;
 import lol.ohai.regex.automata.nfa.thompson.NFA;
+import lol.ohai.regex.automata.nfa.thompson.backtrack.BoundedBacktracker;
 import lol.ohai.regex.automata.nfa.thompson.pikevm.PikeVM;
 import lol.ohai.regex.automata.util.Input;
 import lol.ohai.regex.syntax.ast.Ast;
@@ -101,7 +102,8 @@ public final class Regex {
                     reverseDFA = LazyDFA.create(reverseNfa, reverseCharClasses);
                 }
 
-                strategy = new Strategy.Core(pikeVM, forwardDFA, reverseDFA, prefilter);
+                BoundedBacktracker backtracker = new BoundedBacktracker(nfa);
+                strategy = new Strategy.Core(pikeVM, forwardDFA, reverseDFA, prefilter, backtracker);
                 namedGroups = buildNamedGroupMap(nfa);
             }
 
