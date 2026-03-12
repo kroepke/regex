@@ -89,14 +89,15 @@ public final class Regex {
                 namedGroups = Collections.emptyMap();
             } else {
                 NFA nfa = Compiler.compile(hir);
-                CharClasses charClasses = CharClassBuilder.build(nfa);
+                boolean quitNonAscii = nfa.lookSetAny().containsUnicodeWord();
+                CharClasses charClasses = CharClassBuilder.build(nfa, quitNonAscii);
                 PikeVM pikeVM = new PikeVM(nfa);
                 LazyDFA forwardDFA = LazyDFA.create(nfa, charClasses);
 
                 LazyDFA reverseDFA = null;
                 if (forwardDFA != null) {
                     NFA reverseNfa = Compiler.compileReverse(hir);
-                    CharClasses reverseCharClasses = CharClassBuilder.build(reverseNfa);
+                    CharClasses reverseCharClasses = CharClassBuilder.build(reverseNfa, quitNonAscii);
                     reverseDFA = LazyDFA.create(reverseNfa, reverseCharClasses);
                 }
 
