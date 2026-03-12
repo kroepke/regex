@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Extracts literal prefix sequences from an HIR tree.
+ * Extracts literal prefix and suffix sequences from an HIR tree.
  *
  * <p>Used by the meta engine to build prefilters that skip ahead in the
  * haystack before running the full regex engine.</p>
@@ -27,6 +27,67 @@ public final class LiteralExtractor {
             case Hir.Look ignored -> new LiteralSeq.None();
             case Hir.Repetition ignored -> new LiteralSeq.None();
         };
+    }
+
+    public static LiteralSeq extractSuffixes(Hir hir) {
+        return switch (hir) {
+            case Hir.Literal lit -> new LiteralSeq.Single(lit.chars(), true, true);
+            case Hir.Capture cap -> extractSuffixes(cap.sub());
+            case Hir.Concat concat -> extractSuffixFromConcat(concat.subs());
+            case Hir.Alternation alt -> extractSuffixFromAlternation(alt.subs());
+            case Hir.Empty ignored -> new LiteralSeq.None();
+            case Hir.Class ignored -> new LiteralSeq.None();
+            case Hir.Look ignored -> new LiteralSeq.None();
+            case Hir.Repetition ignored -> new LiteralSeq.None();
+        };
+    }
+
+    private static LiteralSeq extractSuffixFromConcat(List<Hir> subs) {
+        if (subs.isEmpty()) {
+            return new LiteralSeq.None();
+        }
+        List<char[]> parts = new ArrayList<>();
+        boolean allLiteral = true;
+        for (int i = subs.size() - 1; i >= 0; i--) {
+            Hir unwrapped = unwrapCaptures(subs.get(i));
+            if (unwrapped instanceof Hir.Literal lit) {
+                parts.add(0, lit.chars());
+            } else {
+                allLiteral = false;
+                break;
+            }
+        }
+        if (parts.isEmpty()) {
+            return new LiteralSeq.None();
+        }
+        char[] merged = mergeCharArrays(parts);
+        return new LiteralSeq.Single(merged, true, allLiteral);
+    }
+
+    private static LiteralSeq extractSuffixFromAlternation(List<Hir> subs) {
+        if (subs.isEmpty()) {
+            return new LiteralSeq.None();
+        }
+        List<char[]> literals = new ArrayList<>();
+        boolean allEntire = true;
+        for (Hir sub : subs) {
+            LiteralSeq extracted = extractSuffixes(sub);
+            switch (extracted) {
+                case LiteralSeq.Single single -> {
+                    literals.add(single.literal());
+                    if (!single.coversEntirePattern()) {
+                        allEntire = false;
+                    }
+                }
+                case LiteralSeq.None ignored -> {
+                    return new LiteralSeq.None();
+                }
+                case LiteralSeq.Alternation ignored -> {
+                    return new LiteralSeq.None();
+                }
+            }
+        }
+        return new LiteralSeq.Alternation(literals, true, allEntire);
     }
 
     private static LiteralSeq extractFromConcat(List<Hir> subs) {

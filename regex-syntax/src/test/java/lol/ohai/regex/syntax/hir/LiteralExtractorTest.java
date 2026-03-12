@@ -184,4 +184,111 @@ class LiteralExtractorTest {
         assertTrue(single.exact());
         assertTrue(single.coversEntirePattern());
     }
+
+    // === Suffix extraction tests ===
+
+    @Test
+    void suffixFromPureLiteral() {
+        var hir = new Hir.Literal("hello".toCharArray());
+        var result = LiteralExtractor.extractSuffixes(hir);
+        assertInstanceOf(LiteralSeq.Single.class, result);
+        var single = (LiteralSeq.Single) result;
+        assertArrayEquals("hello".toCharArray(), single.literal());
+        assertTrue(single.exact());
+        assertTrue(single.coversEntirePattern());
+    }
+
+    @Test
+    void suffixFromConcatTrailingLiteral() {
+        // \w+Holmes
+        var hir = new Hir.Concat(List.of(
+                new Hir.Repetition(1, Hir.Repetition.UNBOUNDED, true,
+                        new Hir.Class(new ClassUnicode(List.of(
+                                new ClassUnicode.ClassUnicodeRange('a', 'z'))))),
+                new Hir.Literal("Holmes".toCharArray())
+        ));
+        var result = LiteralExtractor.extractSuffixes(hir);
+        assertInstanceOf(LiteralSeq.Single.class, result);
+        var single = (LiteralSeq.Single) result;
+        assertArrayEquals("Holmes".toCharArray(), single.literal());
+        assertTrue(single.exact());
+        assertFalse(single.coversEntirePattern());
+    }
+
+    @Test
+    void suffixFromConcatMultipleTrailingLiterals() {
+        // \w+ "foo" "bar"
+        var hir = new Hir.Concat(List.of(
+                new Hir.Repetition(1, Hir.Repetition.UNBOUNDED, true,
+                        new Hir.Class(new ClassUnicode(List.of(
+                                new ClassUnicode.ClassUnicodeRange('a', 'z'))))),
+                new Hir.Literal("foo".toCharArray()),
+                new Hir.Literal("bar".toCharArray())
+        ));
+        var result = LiteralExtractor.extractSuffixes(hir);
+        assertInstanceOf(LiteralSeq.Single.class, result);
+        var single = (LiteralSeq.Single) result;
+        assertArrayEquals("foobar".toCharArray(), single.literal());
+        assertTrue(single.exact());
+        assertFalse(single.coversEntirePattern());
+    }
+
+    @Test
+    void suffixFromConcatNoTrailingLiteral() {
+        // "hello"\w+
+        var hir = new Hir.Concat(List.of(
+                new Hir.Literal("hello".toCharArray()),
+                new Hir.Repetition(1, Hir.Repetition.UNBOUNDED, true,
+                        new Hir.Class(new ClassUnicode(List.of(
+                                new ClassUnicode.ClassUnicodeRange('a', 'z')))))
+        ));
+        var result = LiteralExtractor.extractSuffixes(hir);
+        assertInstanceOf(LiteralSeq.None.class, result);
+    }
+
+    @Test
+    void suffixFromAlternation() {
+        // \w+"foo" | \w+"bar"
+        var wordClass = new Hir.Class(new ClassUnicode(List.of(
+                new ClassUnicode.ClassUnicodeRange('a', 'z'))));
+        var hir = new Hir.Alternation(List.of(
+                new Hir.Concat(List.of(
+                        new Hir.Repetition(1, Hir.Repetition.UNBOUNDED, true, wordClass),
+                        new Hir.Literal("foo".toCharArray()))),
+                new Hir.Concat(List.of(
+                        new Hir.Repetition(1, Hir.Repetition.UNBOUNDED, true, wordClass),
+                        new Hir.Literal("bar".toCharArray())))
+        ));
+        var result = LiteralExtractor.extractSuffixes(hir);
+        assertInstanceOf(LiteralSeq.Alternation.class, result);
+        var alt = (LiteralSeq.Alternation) result;
+        assertEquals(2, alt.literals().size());
+        assertArrayEquals("foo".toCharArray(), alt.literals().get(0));
+        assertArrayEquals("bar".toCharArray(), alt.literals().get(1));
+        assertTrue(alt.exact());
+        assertFalse(alt.coversEntirePattern());
+    }
+
+    @Test
+    void suffixThroughCapture() {
+        // \w+(Holmes)
+        var hir = new Hir.Concat(List.of(
+                new Hir.Repetition(1, Hir.Repetition.UNBOUNDED, true,
+                        new Hir.Class(new ClassUnicode(List.of(
+                                new ClassUnicode.ClassUnicodeRange('a', 'z'))))),
+                new Hir.Capture(1, null, new Hir.Literal("Holmes".toCharArray()))
+        ));
+        var result = LiteralExtractor.extractSuffixes(hir);
+        assertInstanceOf(LiteralSeq.Single.class, result);
+        var single = (LiteralSeq.Single) result;
+        assertArrayEquals("Holmes".toCharArray(), single.literal());
+    }
+
+    @Test
+    void suffixFromRepetition() {
+        var hir = new Hir.Repetition(1, Hir.Repetition.UNBOUNDED, true,
+                new Hir.Literal("a".toCharArray()));
+        var result = LiteralExtractor.extractSuffixes(hir);
+        assertInstanceOf(LiteralSeq.None.class, result);
+    }
 }
