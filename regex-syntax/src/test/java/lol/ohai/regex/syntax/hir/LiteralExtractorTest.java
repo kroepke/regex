@@ -291,4 +291,124 @@ class LiteralExtractorTest {
         var result = LiteralExtractor.extractSuffixes(hir);
         assertInstanceOf(LiteralSeq.None.class, result);
     }
+
+    // === Inner literal extraction tests ===
+
+    @Test
+    void innerFromConcatWithMiddleLiteral() {
+        // \w+Holmes\w+ → inner "Holmes", inexact, prefixHir = \w+
+        Hir wordRep = new Hir.Repetition(1, Hir.Repetition.UNBOUNDED, true,
+                new Hir.Class(new ClassUnicode(List.of(new ClassUnicode.ClassUnicodeRange('a', 'z')))));
+        Hir hir = new Hir.Concat(List.of(
+                wordRep,
+                new Hir.Literal("Holmes".toCharArray()),
+                wordRep
+        ));
+        LiteralExtractor.InnerLiteral result = LiteralExtractor.extractInner(hir);
+        assertNotNull(result);
+        assertInstanceOf(LiteralSeq.Single.class, result.literal());
+        LiteralSeq.Single single = (LiteralSeq.Single) result.literal();
+        assertArrayEquals("Holmes".toCharArray(), single.literal());
+        assertFalse(single.exact(), "inner literals must be inexact");
+        assertNotNull(result.prefixHir());
+    }
+
+    @Test
+    void innerSelectsLongest() {
+        // \w+ab\w+Holmes\w+ → inner "Holmes" (longer than "ab")
+        Hir wordRep = new Hir.Repetition(1, Hir.Repetition.UNBOUNDED, true,
+                new Hir.Class(new ClassUnicode(List.of(new ClassUnicode.ClassUnicodeRange('a', 'z')))));
+        Hir hir = new Hir.Concat(List.of(
+                wordRep,
+                new Hir.Literal("ab".toCharArray()),
+                wordRep,
+                new Hir.Literal("Holmes".toCharArray()),
+                wordRep
+        ));
+        LiteralExtractor.InnerLiteral result = LiteralExtractor.extractInner(hir);
+        assertNotNull(result);
+        LiteralSeq.Single single = (LiteralSeq.Single) result.literal();
+        assertArrayEquals("Holmes".toCharArray(), single.literal());
+    }
+
+    @Test
+    void innerReturnsNullForPureLiteral() {
+        // "hello" → no inner (position 0 is prefix territory, nothing else)
+        Hir hir = new Hir.Literal("hello".toCharArray());
+        LiteralExtractor.InnerLiteral result = LiteralExtractor.extractInner(hir);
+        assertNull(result);
+    }
+
+    @Test
+    void innerReturnsNullForNonConcat() {
+        // \w+ → no inner (not a concat)
+        Hir hir = new Hir.Repetition(1, Hir.Repetition.UNBOUNDED, true,
+                new Hir.Class(new ClassUnicode(List.of(new ClassUnicode.ClassUnicodeRange('a', 'z')))));
+        LiteralExtractor.InnerLiteral result = LiteralExtractor.extractInner(hir);
+        assertNull(result);
+    }
+
+    @Test
+    void innerSkipsPosition0() {
+        // helloWorld\w+ → no inner (position 0 is "helloWorld", nothing at inner positions)
+        Hir hir = new Hir.Concat(List.of(
+                new Hir.Literal("helloWorld".toCharArray()),
+                new Hir.Repetition(1, Hir.Repetition.UNBOUNDED, true,
+                        new Hir.Class(new ClassUnicode(List.of(new ClassUnicode.ClassUnicodeRange('a', 'z')))))
+        ));
+        LiteralExtractor.InnerLiteral result = LiteralExtractor.extractInner(hir);
+        assertNull(result);
+    }
+
+    @Test
+    void innerThroughCapture() {
+        // \w+(Holmes)\w+ → inner "Holmes", inexact
+        Hir wordRep = new Hir.Repetition(1, Hir.Repetition.UNBOUNDED, true,
+                new Hir.Class(new ClassUnicode(List.of(new ClassUnicode.ClassUnicodeRange('a', 'z')))));
+        Hir hir = new Hir.Concat(List.of(
+                wordRep,
+                new Hir.Capture(1, null,
+                        new Hir.Literal("Holmes".toCharArray())),
+                wordRep
+        ));
+        LiteralExtractor.InnerLiteral result = LiteralExtractor.extractInner(hir);
+        assertNotNull(result);
+        LiteralSeq.Single single = (LiteralSeq.Single) result.literal();
+        assertArrayEquals("Holmes".toCharArray(), single.literal());
+        assertFalse(single.exact());
+    }
+
+    @Test
+    void innerDoesNotPickAdjacentLeadingLiterals() {
+        // Concat([Literal("hel"), Literal("lo"), Repetition, Literal("World")])
+        // Should return "World" (not "lo" which is adjacent to the leading literal)
+        Hir hir = new Hir.Concat(List.of(
+                new Hir.Literal("hel".toCharArray()),
+                new Hir.Literal("lo".toCharArray()),
+                new Hir.Repetition(1, Hir.Repetition.UNBOUNDED, true,
+                        new Hir.Class(new ClassUnicode(List.of(new ClassUnicode.ClassUnicodeRange('a', 'z'))))),
+                new Hir.Literal("World".toCharArray())
+        ));
+        LiteralExtractor.InnerLiteral result = LiteralExtractor.extractInner(hir);
+        assertNotNull(result);
+        LiteralSeq.Single single = (LiteralSeq.Single) result.literal();
+        // "World" (5 chars) is longer than "lo" (2 chars), so it wins
+        assertArrayEquals("World".toCharArray(), single.literal());
+    }
+
+    @Test
+    void innerPrefixHirIsCorrect() {
+        // \w+Holmes\w+ → prefixHir should be the \w+ repetition wrapped in a Concat
+        Hir wordRep = new Hir.Repetition(1, Hir.Repetition.UNBOUNDED, true,
+                new Hir.Class(new ClassUnicode(List.of(new ClassUnicode.ClassUnicodeRange('a', 'z')))));
+        Hir hir = new Hir.Concat(List.of(
+                wordRep,
+                new Hir.Literal("Holmes".toCharArray()),
+                wordRep
+        ));
+        LiteralExtractor.InnerLiteral result = LiteralExtractor.extractInner(hir);
+        assertNotNull(result);
+        // prefixHir is the sub-expression(s) before the inner literal
+        assertInstanceOf(Hir.class, result.prefixHir());
+    }
 }

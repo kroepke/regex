@@ -13,6 +13,69 @@ public final class LiteralExtractor {
 
     private LiteralExtractor() {}
 
+    /**
+     * Result of inner literal extraction. Contains the extracted literal
+     * and the HIR of the prefix portion (everything before the inner literal).
+     * The prefix HIR is used to compile a separate reverse NFA/DFA for
+     * the ReverseInner strategy.
+     */
+    public record InnerLiteral(LiteralSeq literal, Hir prefixHir) {}
+
+    /**
+     * Extracts the best inner literal from a top-level Concat.
+     *
+     * <p>Scans each position in the concat (skipping position 0, which is prefix
+     * territory). For each position, tries to extract a literal. Returns the
+     * longest candidate, along with the prefix HIR (everything before it).</p>
+     *
+     * <p>The "longest literal" heuristic minimizes false positive hits from
+     * {@code indexOf}. The upstream Rust crate uses
+     * {@code optimize_for_prefix_by_preference()} which ranks candidates by
+     * byte frequency — this is a known simplification that could be refined
+     * in the future.</p>
+     *
+     * @return the inner literal and prefix HIR, or null if no inner literal found
+     */
+    public static InnerLiteral extractInner(Hir hir) {
+        if (!(hir instanceof Hir.Concat concat)) {
+            return null;
+        }
+        List<Hir> subs = concat.subs();
+        if (subs.size() < 2) {
+            return null;
+        }
+
+        int bestPos = -1;
+        LiteralSeq bestLiteral = null;
+        int bestLen = 0;
+
+        // Skip position 0 (prefix territory)
+        for (int i = 1; i < subs.size(); i++) {
+            Hir sub = unwrapCaptures(subs.get(i));
+            if (sub instanceof Hir.Literal lit) {
+                if (lit.chars().length > bestLen) {
+                    bestPos = i;
+                    bestLiteral = new LiteralSeq.Single(lit.chars(), false, false);
+                    bestLen = lit.chars().length;
+                }
+            }
+        }
+
+        if (bestLiteral == null) {
+            return null;
+        }
+
+        // Build prefix HIR: everything before the inner literal position
+        Hir prefixHir;
+        if (bestPos == 1) {
+            prefixHir = subs.get(0);
+        } else {
+            prefixHir = new Hir.Concat(subs.subList(0, bestPos));
+        }
+
+        return new InnerLiteral(bestLiteral, prefixHir);
+    }
+
     public static LiteralSeq extractPrefixes(Hir hir) {
         return switch (hir) {
             case Hir.Literal lit -> new LiteralSeq.Single(lit.chars(), true, true);
