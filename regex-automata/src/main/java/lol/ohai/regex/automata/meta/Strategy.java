@@ -395,10 +395,173 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
 
     record ReverseInner(PikeVM pikeVM, LazyDFA forwardDFA, LazyDFA prefixReverseDFA,
                         Prefilter innerPrefilter, BoundedBacktracker backtracker) implements Strategy {
-        @Override public Cache createCache() { throw new UnsupportedOperationException("TODO"); }
-        @Override public boolean isMatch(Input input, Cache cache) { throw new UnsupportedOperationException("TODO"); }
-        @Override public Captures search(Input input, Cache cache) { throw new UnsupportedOperationException("TODO"); }
-        @Override public Captures searchCaptures(Input input, Cache cache) { throw new UnsupportedOperationException("TODO"); }
+
+        @Override
+        public Cache createCache() {
+            return new Cache(
+                    pikeVM.createCache(),
+                    forwardDFA.createCache(),
+                    null,  // reverseDFACache — not used by ReverseInner
+                    backtracker != null ? backtracker.createCache() : null,
+                    prefixReverseDFA.createCache()  // prefix-only reverse DFA
+            );
+        }
+
+        @Override
+        public boolean isMatch(Input input, Cache cache) {
+            if (input.isAnchored()) {
+                return pikeVM.isMatch(input, cache.pikeVMCache());
+            }
+            int start = input.start();
+            int end = input.end();
+            String haystackStr = input.haystackStr();
+            int minStart = input.start();
+            int minPreStart = input.start();
+
+            while (start < end) {
+                int innerPos = innerPrefilter.find(haystackStr, start, end);
+                if (innerPos < 0) return false;
+
+                // Quadratic-abort: if we're scanning backwards past where we've
+                // already ruled out, fall back to PikeVM
+                if (innerPos < minPreStart) {
+                    return pikeVM.isMatch(input.withBounds(start, end, false), cache.pikeVMCache());
+                }
+
+                Input reverseInput = input.withBounds(minStart, innerPos, true);
+                SearchResult revResult = prefixReverseDFA.searchRev(reverseInput, cache.prefixReverseDFACache());
+
+                switch (revResult) {
+                    case SearchResult.NoMatch n -> {
+                        minStart = innerPos;
+                        minPreStart = innerPos + 1;
+                        start = innerPos + 1;
+                        continue;
+                    }
+                    case SearchResult.GaveUp g -> {
+                        return pikeVM.isMatch(input.withBounds(start, end, false), cache.pikeVMCache());
+                    }
+                    case SearchResult.Match m -> {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        @Override
+        public Captures search(Input input, Cache cache) {
+            if (input.isAnchored()) {
+                return pikeVM.search(input, cache.pikeVMCache());
+            }
+            int start = input.start();
+            int end = input.end();
+            String haystackStr = input.haystackStr();
+            int minStart = input.start();
+            int minPreStart = input.start();
+
+            while (start < end) {
+                int innerPos = innerPrefilter.find(haystackStr, start, end);
+                if (innerPos < 0) return null;
+
+                // Quadratic-abort
+                if (innerPos < minPreStart) {
+                    return pikeVM.search(input.withBounds(start, end, false), cache.pikeVMCache());
+                }
+
+                Input reverseInput = input.withBounds(minStart, innerPos, true);
+                SearchResult revResult = prefixReverseDFA.searchRev(reverseInput, cache.prefixReverseDFACache());
+
+                switch (revResult) {
+                    case SearchResult.NoMatch n -> {
+                        minStart = innerPos;
+                        minPreStart = innerPos + 1;
+                        start = innerPos + 1;
+                        continue;
+                    }
+                    case SearchResult.GaveUp g -> {
+                        return pikeVM.search(input.withBounds(start, end, false), cache.pikeVMCache());
+                    }
+                    case SearchResult.Match m -> {
+                        int matchStart = m.offset();
+                        Input fwdInput = input.withBounds(matchStart, end, false);
+                        SearchResult fwdResult = forwardDFA.searchFwd(fwdInput, cache.forwardDFACache());
+
+                        switch (fwdResult) {
+                            case SearchResult.Match fm -> {
+                                Input narrowed = input.withBounds(matchStart, fm.offset(), false);
+                                return pikeVM.search(narrowed, cache.pikeVMCache());
+                            }
+                            case SearchResult.GaveUp g2 -> {
+                                return pikeVM.search(fwdInput, cache.pikeVMCache());
+                            }
+                            case SearchResult.NoMatch n2 -> {
+                                start = innerPos + 1;
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public Captures searchCaptures(Input input, Cache cache) {
+            if (input.isAnchored()) {
+                return pikeVM.searchCaptures(input, cache.pikeVMCache());
+            }
+            int start = input.start();
+            int end = input.end();
+            String haystackStr = input.haystackStr();
+            int minStart = input.start();
+            int minPreStart = input.start();
+
+            while (start < end) {
+                int innerPos = innerPrefilter.find(haystackStr, start, end);
+                if (innerPos < 0) return null;
+
+                // Quadratic-abort
+                if (innerPos < minPreStart) {
+                    return pikeVM.searchCaptures(input.withBounds(start, end, false), cache.pikeVMCache());
+                }
+
+                Input reverseInput = input.withBounds(minStart, innerPos, true);
+                SearchResult revResult = prefixReverseDFA.searchRev(reverseInput, cache.prefixReverseDFACache());
+
+                switch (revResult) {
+                    case SearchResult.NoMatch n -> {
+                        minStart = innerPos;
+                        minPreStart = innerPos + 1;
+                        start = innerPos + 1;
+                        continue;
+                    }
+                    case SearchResult.GaveUp g -> {
+                        return pikeVM.searchCaptures(input.withBounds(start, end, false), cache.pikeVMCache());
+                    }
+                    case SearchResult.Match m -> {
+                        int matchStart = m.offset();
+                        Input fwdInput = input.withBounds(matchStart, end, false);
+                        SearchResult fwdResult = forwardDFA.searchFwd(fwdInput, cache.forwardDFACache());
+
+                        switch (fwdResult) {
+                            case SearchResult.Match fm -> {
+                                Input narrowed = input.withBounds(matchStart, fm.offset(), false);
+                                return Strategy.doCaptureEngine(narrowed, cache, pikeVM, backtracker);
+                            }
+                            case SearchResult.GaveUp g2 -> {
+                                return pikeVM.searchCaptures(fwdInput, cache.pikeVMCache());
+                            }
+                            case SearchResult.NoMatch n2 -> {
+                                start = innerPos + 1;
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+            return null;
+        }
     }
 
     /**
