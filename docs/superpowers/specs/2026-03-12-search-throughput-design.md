@@ -68,14 +68,17 @@ nofail fallback [when DFA gives up or is unavailable]:
   2. PikeVM (always available)
 ```
 
-For the DFA search loop (both forward and reverse):
+For the DFA search loop (both forward and reverse), quit chars are integrated into the transition table (not a pre-check). Quit char classes transition to a sentinel QUIT state, checked alongside match/dead:
 
 ```
 for each char in haystack:
   1. Look up char class (existing)
-  2. If char class is QUIT_CLASS → return GaveUp(offset)
-  3. Look up next state from transition table (existing)
-  4. Check for match/dead state (existing)
+  2. Look up next state from transition table (existing)
+     // quit char classes map to QUIT state via transition table
+  3. Check state tag:
+     if is_match(next_state)  → record match, continue
+     if is_dead(next_state)   → return last match or NoMatch
+     if is_quit(next_state)   → return GaveUp(offset)
 ```
 
 ### Integration Points
@@ -150,16 +153,27 @@ if is_quit(next_state)   → return GaveUp(offset)
 
 The current two-phase search (forward DFA → PikeVM) is replaced by three-phase (forward DFA → reverse DFA → result). For non-capture searches, this eliminates PikeVM entirely. For capture searches, the reverse DFA narrows the window to just the match, dramatically reducing PikeVM/backtracker work.
 
-### Key Finding: No Lazy Quantifier Analysis Needed
+### Resolving the Lazy Quantifier Concern
 
-Our `lazy-dfa-gaps.md` documented that three-phase search is "blocked" on HIR-level analysis to detect lazy quantifiers. Research into the upstream reveals this is unnecessary:
+Our `lazy-dfa-gaps.md` documented that three-phase search is "blocked" on HIR-level analysis to detect lazy quantifiers, because the forward DFA finds leftmost-longest matches even for lazy quantifiers. Research into the upstream reveals a different resolution:
+
+**What the upstream does:**
 
 1. The upstream's `Core::search()` **always** uses the DFA (forward + reverse) — zero conditional logic for lazy quantifiers
 2. The DFA uses `LeftmostFirst` semantics which in DFA terms produces leftmost-longest matches
 3. For captures, PikeVM/BoundedBacktracker handles correct lazy semantics on the narrowed window
 4. The upstream test suite confirms this behavior (e.g., `flags.toml` tests for `(?U)` flag patterns)
 
-This means we activate three-phase for **all patterns** — no pattern analysis step, matching upstream exactly.
+**API contract clarification:**
+
+The gap document's concern was valid under the assumption that `search()` (non-capture) must return identical match bounds to `searchCaptures()`. The upstream's API has a different contract:
+
+- **`search()` / `find()` / `findAll()`** (non-capture): returns leftmost-longest match bounds (DFA result). Lazy quantifiers do NOT affect match span through this path. Example: `(?U)a+` on `"aaa"` returns `[0, 3]` via the DFA.
+- **`searchCaptures()` / `captures()` / `capturesAll()`** (with captures): returns match bounds with correct lazy/greedy semantics via PikeVM/BoundedBacktracker. Example: `(?U)a+` on `"aaa"` returns `[0, 1]` via PikeVM.
+
+This means `find()` and `captures().get(0)` **can return different match boundaries** for patterns with lazy quantifiers. This is intentional — it matches the upstream's behavior where the DFA's speed is preferred for non-capture search, and correct lazy semantics are only guaranteed when captures are requested.
+
+**Resolution:** We activate three-phase for **all patterns** — no pattern analysis step, matching upstream exactly. The `lazy-dfa-gaps.md` will be updated to document this API contract rather than treating it as a blocking issue.
 
 ### Design
 
@@ -174,11 +188,17 @@ Current (two-phase):
 New (three-phase):
 ```
 1. forwardDFA.searchFwd(input, cache) → Match(end)
-2. reverseDFA.searchRev(input.withBounds(searchStart, end, true), cache) → Match(start)
-3. return Captures with group 0 = [start, end]
+2. Edge cases:
+   a. If end == searchStart → empty match, return Match(start, end) immediately
+   b. If search is anchored → start = searchStart, skip reverse DFA
+3. reverseDFA.searchRev(input.withBounds(searchStart, end, true), cache) → Match(start)
+4. return Captures with group 0 = [start, end]
 ```
 
-On `GaveUp` from either DFA: fall back to nofail path (BoundedBacktracker or PikeVM on the best available bounds).
+**GaveUp handling:**
+- Forward DFA `GaveUp(offset)`: fall back to nofail path on the **original** search bounds `[searchStart, input.end()]`. The DFA may have passed valid match starts before quitting, so we must search from `searchStart`, not from the quit offset.
+- Reverse DFA `GaveUp(offset)`: fall back to nofail path on `[searchStart, end]`. The forward DFA's match end is still valid as an upper bound.
+- Nofail path: BoundedBacktracker (if haystack ≤ maxLen), else PikeVM.
 
 **Changes to `Strategy.Core.searchCaptures()` (with captures):**
 
@@ -191,10 +211,15 @@ Current:
 New:
 ```
 1. forwardDFA.searchFwd(input, cache) → Match(end)
-2. reverseDFA.searchRev(input.withBounds(searchStart, end, true), cache) → Match(start)
-3. captureEngine(input.withBounds(start, end, true), cache) → Captures
+2. Edge cases:
+   a. If end == searchStart → empty match, capture engine on anchored [start, end]
+   b. If search is anchored → start = searchStart, skip reverse DFA
+3. reverseDFA.searchRev(input.withBounds(searchStart, end, true), cache) → Match(start)
+4. captureEngine(input.withBounds(start, end, true), cache) → Captures
    // captureEngine = BoundedBacktracker if window ≤ maxLen, else PikeVM
 ```
+
+GaveUp handling follows the same rules as non-capture search above.
 
 The critical improvement: the capture engine now runs on `[matchStart, matchEnd]` (just the match itself) instead of `[searchStart, matchEnd]` (from last match to new match end). For a 10-char date in a 15KB haystack, this is a 1500x reduction in the PikeVM/backtracker work window.
 
@@ -239,7 +264,7 @@ public final class BoundedBacktracker {
         int stride;          // haystackLen + 1
         Frame[] stack;       // explicit backtrack stack
         int stackTop;
-        int[] slots;         // capture slot values (mutable during search)
+        int[] slots;         // capture slot values, -1 = unset (matching PikeVM convention)
     }
 }
 
@@ -268,6 +293,8 @@ search(input, cache):
   return null
 ```
 
+Note: the unanchored loop clears the visited bitset for each start position, giving O(n * m * k) total work where n = haystack length, m = NFA states, k = per-position search cost. This matches upstream behavior. In practice, this path is only reached in the nofail fallback when DFAs are unavailable, and the backtracker's size limit prevents it from being used on large haystacks.
+
 **Backtrack function:**
 
 ```
@@ -295,12 +322,12 @@ step(cache, input, sid, at, slots):
         if at >= input.end() → return null
         c = haystack[at]
         if c < start || c > end → return null
-        at += Character.charCount(c)
-        sid = next
+        at += 1       // always +1: supplementary code points are decomposed
+        sid = next    // into surrogate pair state sequences by the NFA compiler
 
       Sparse(transitions):
         if at >= input.end() → return null
-        find matching transition for haystack[at]
+        iterate transitions, find first where haystack[at] in [trans.start, trans.end]
         if none → return null
         at += 1; sid = transition.next
 
@@ -328,12 +355,16 @@ step(cache, input, sid, at, slots):
 ### Size Limit
 
 ```java
-// Default capacity: 256KB = 2,097,152 bits
-static final int DEFAULT_VISITED_CAPACITY = 256 * 1024;
+// Default capacity: 256KB (in bytes)
+static final int DEFAULT_VISITED_CAPACITY_BYTES = 256 * 1024;
+static final int BLOCK_SIZE = Long.SIZE;  // 64 bits per long
 
 int maxHaystackLen(NFA nfa) {
-    int capacityBits = DEFAULT_VISITED_CAPACITY * 8;
-    return (capacityBits / nfa.stateCount()) - 1;
+    int capacityBits = DEFAULT_VISITED_CAPACITY_BYTES * 8;
+    // Round up to block boundaries (matching upstream's div_ceil logic)
+    int blocks = (capacityBits + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    int realCapacityBits = blocks * BLOCK_SIZE;
+    return (realCapacityBits / nfa.stateCount()) - 1;
 }
 ```
 
@@ -341,8 +372,8 @@ After three-phase narrowing, the match window is typically 10-50 chars. Even wit
 
 ### Byte-to-Char Adaptation
 
-- Upstream advances `at += 1` (one byte). We advance `at += 1` for BMP chars or use `Character.charCount()` for surrogate-aware advancement in `CharRange`.
-- Visited bitset indexed by char position, not byte position.
+- Both upstream and our port advance `at += 1` per state transition. The upstream operates on bytes (UTF-8); we operate on chars (UTF-16 code units). Supplementary code points are handled identically in both: the NFA compiler decomposes them into sequences of two states (byte sequences in upstream, surrogate pair sequences in our port). Each `CharRange` state matches exactly one code unit, so `at += 1` is always correct.
+- Visited bitset indexed by char position (code unit offset), not byte position.
 - NFA state types map 1:1: `CharRange` ↔ `ByteRange`, `Sparse` ↔ `SparseTransitions`, `Union` ↔ `Union`, etc.
 - This matches our existing PikeVM's char-unit adaptation.
 
@@ -376,7 +407,7 @@ These components have minimal dependencies and could be developed in parallel, b
 3. **Bounded Backtracker** — medium complexity, new engine but well-understood algorithm, biggest impact on capture benchmarks
 
 Each component is independently valuable and testable:
-- Quit chars alone improves unicodeWord from 2,821x → ~100x slower (DFA with PikeVM fallback)
+- Quit chars alone improves unicodeWord from 2,821x → ~100x slower for predominantly ASCII haystacks (DFA with PikeVM fallback on non-ASCII segments)
 - Three-phase alone improves charClass from 20x → ~1-2x
 - Bounded backtracker alone (without three-phase) still helps captures via faster PikeVM fallback
 
@@ -416,14 +447,14 @@ Combined, they compose multiplicatively: quit chars enables DFA → three-phase 
 
 ## Upstream References
 
-| Component | Upstream File | Key Lines |
+| Component | Upstream File | Key Function/Section |
 |-----------|--------------|-----------|
-| Quit bytes config | `regex-automata/src/hybrid/dfa.rs` | 3871-3875 (Unicode word → quit 0x80-0xFF) |
-| Quit bytes in transitions | `regex-automata/src/hybrid/dfa.rs` | 2313-2318 (overwrite quit transitions) |
-| Three-phase search | `regex-automata/src/meta/wrappers.rs` | 516-623 (HybridEngine forward + reverse) |
-| Core search fallback | `regex-automata/src/meta/strategy.rs` | 705-730 (DFA → nofail cascade) |
-| Bounded backtracker | `regex-automata/src/nfa/thompson/backtrack.rs` | Full file (1908 lines) |
-| Backtracker in meta | `regex-automata/src/meta/wrappers.rs` | 142-324 (wrapper + eligibility checks) |
+| Quit bytes config | `regex-automata/src/hybrid/dfa.rs` | `quit_set_from_nfa()` — adds 0x80-0xFF for Unicode word |
+| Quit bytes in transitions | `regex-automata/src/hybrid/dfa.rs` | `add_state()` — overwrites quit byte transitions to QUIT state |
+| Three-phase search | `regex-automata/src/meta/wrappers.rs` | `HybridEngine::try_search()` — forward + reverse half matches |
+| Core search fallback | `regex-automata/src/meta/strategy.rs` | `Core::search()` and `Core::search_nofail()` — DFA → nofail cascade |
+| Bounded backtracker | `regex-automata/src/nfa/thompson/backtrack.rs` | `BoundedBacktracker::try_search_slots()`, `step()`, `backtrack()` |
+| Backtracker in meta | `regex-automata/src/meta/wrappers.rs` | `BoundedBacktrackerEngine` wrapper + `get()` eligibility check |
 
 ## Gap Document Updates
 
