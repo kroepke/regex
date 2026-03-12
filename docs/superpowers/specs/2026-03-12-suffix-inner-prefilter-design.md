@@ -176,7 +176,7 @@ search(input, cache):
 
     start = input.start()
     end = input.end()
-    minStart = 0
+    minStart = input.start()
 
     while start < end:
         suffixPos = suffixPrefilter.find(haystack, start, end)
@@ -219,8 +219,8 @@ search(input, cache):
 
     start = input.start()
     end = input.end()
-    minStart = 0
-    minPreStart = 0
+    minStart = input.start()
+    minPreStart = input.start()
 
     while start < end:
         innerPos = innerPrefilter.find(haystack, start, end)
