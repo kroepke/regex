@@ -79,4 +79,14 @@ class LookSetTest {
         assertTrue(LookSet.of(LookKind.END_LINE_CRLF).containsCrlf());
         assertFalse(LookSet.of(LookKind.START_LINE).containsCrlf());
     }
+
+    @Test
+    void containsUnicodeWord() {
+        LookSet set = LookSet.of(LookKind.WORD_BOUNDARY_UNICODE);
+        assertTrue(set.containsUnicodeWord());
+        assertFalse(set.containsCrlf());
+
+        LookSet ascii = LookSet.of(LookKind.WORD_BOUNDARY_ASCII);
+        assertFalse(ascii.containsUnicodeWord());
+    }
 }

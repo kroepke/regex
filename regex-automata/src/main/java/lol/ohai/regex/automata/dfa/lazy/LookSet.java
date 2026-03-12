@@ -61,6 +61,16 @@ public record LookSet(int bits) {
                 || contains(LookKind.END_LINE_CRLF);
     }
 
+    /** Returns true if this set contains any Unicode (non-ASCII) word boundary assertion. */
+    public boolean containsUnicodeWord() {
+        return contains(LookKind.WORD_BOUNDARY_UNICODE)
+                || contains(LookKind.WORD_BOUNDARY_UNICODE_NEGATE)
+                || contains(LookKind.WORD_START_UNICODE)
+                || contains(LookKind.WORD_END_UNICODE)
+                || contains(LookKind.WORD_START_HALF_UNICODE)
+                || contains(LookKind.WORD_END_HALF_UNICODE);
+    }
+
     /**
      * Returns true if this set contains any look-assertion kind that the
      * lazy DFA cannot handle.  The DFA only has ASCII word-char tables, so
@@ -68,13 +78,16 @@ public record LookSet(int bits) {
      * unsupported.  CRLF-aware line anchors are also unsupported.
      */
     public boolean containsUnsupportedByDFA() {
-        return contains(LookKind.WORD_BOUNDARY_UNICODE)
-                || contains(LookKind.WORD_BOUNDARY_UNICODE_NEGATE)
-                || contains(LookKind.WORD_START_UNICODE)
-                || contains(LookKind.WORD_END_UNICODE)
-                || contains(LookKind.WORD_START_HALF_UNICODE)
-                || contains(LookKind.WORD_END_HALF_UNICODE)
-                || contains(LookKind.START_LINE_CRLF)
-                || contains(LookKind.END_LINE_CRLF);
+        return containsUnicodeWord() || containsCrlf();
+    }
+
+    /**
+     * Returns true if this set contains look-assertion kinds that require
+     * the DFA to bail out entirely. After quit-char support, only CRLF
+     * line anchors cause full bail-out. Unicode word boundaries are handled
+     * via quit chars instead.
+     */
+    public boolean containsBailOutByDFA() {
+        return containsCrlf();
     }
 }

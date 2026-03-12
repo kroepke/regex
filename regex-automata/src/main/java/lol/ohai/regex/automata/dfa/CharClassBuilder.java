@@ -11,9 +11,19 @@ public final class CharClassBuilder {
     private CharClassBuilder() {}
 
     public static CharClasses build(NFA nfa) {
+        return build(nfa, false);
+    }
+
+    public static CharClasses build(NFA nfa, boolean quitNonAscii) {
         TreeSet<Integer> boundaries = new TreeSet<>();
         boundaries.add(0);
         boundaries.add(0x10000);
+
+        // If quit chars are configured, force a boundary at char 128 to
+        // separate ASCII chars (never quit) from non-ASCII chars (always quit).
+        if (quitNonAscii) {
+            boundaries.add(128);
+        }
 
         for (int i = 0; i < nfa.stateCount(); i++) {
             State state = nfa.state(i);
@@ -107,8 +117,19 @@ public final class CharClassBuilder {
             }
         }
 
+        boolean[] quitClassArr = null;
+        if (quitNonAscii) {
+            quitClassArr = new boolean[classCount];
+            for (int cls = 0; cls < classCount && cls < sortedBounds.length - 1; cls++) {
+                int representative = sortedBounds[cls];
+                if (representative >= 128 && representative < 65536) {
+                    quitClassArr[cls] = true;
+                }
+            }
+        }
+
         return new CharClasses(uniqueRows.toArray(byte[][]::new), highIndex, classCount,
-                wordClass, lineLF, lineCR);
+                wordClass, lineLF, lineCR, quitClassArr);
     }
 
     private static boolean isWordChar(char c) {

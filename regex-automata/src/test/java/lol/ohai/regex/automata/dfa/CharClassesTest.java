@@ -84,6 +84,25 @@ class CharClassesTest {
         }
     }
 
+    @Test
+    void quitClassForNonAscii() throws Exception {
+        // Build char classes with quit chars enabled (Unicode word boundary pattern)
+        Ast ast = Parser.parse("\\b", 250);
+        Hir hir = Translator.translate("\\b", ast);
+        NFA nfa = Compiler.compile(hir);
+        CharClasses cc = CharClassBuilder.build(nfa, true); // true = quitNonAscii
+
+        // ASCII chars should NOT be quit classes
+        assertFalse(cc.isQuitClass(cc.classify('a')));
+        assertFalse(cc.isQuitClass(cc.classify('Z')));
+        assertFalse(cc.isQuitClass(cc.classify(' ')));
+
+        // Non-ASCII chars SHOULD be quit classes
+        assertTrue(cc.isQuitClass(cc.classify('\u00E9'))); // é
+        assertTrue(cc.isQuitClass(cc.classify('\u4E2D'))); // 中
+        assertTrue(cc.isQuitClass(cc.classify('\u0080'))); // first non-ASCII
+    }
+
     private static CharClasses buildCharClasses(String pattern) {
         try {
             Ast ast = Parser.parse(pattern, 250);
