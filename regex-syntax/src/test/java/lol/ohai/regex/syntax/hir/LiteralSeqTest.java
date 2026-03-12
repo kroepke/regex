@@ -14,27 +14,27 @@ class LiteralSeqTest {
 
     @Test
     void singleCoversEntirePatternWhenFlagged() {
-        var single = new LiteralSeq.Single("hello".toCharArray(), true);
+        var single = new LiteralSeq.Single("hello".toCharArray(), true, true);
         assertTrue(single.coversEntirePattern());
     }
 
     @Test
     void singleDoesNotCoverEntirePatternWhenNotFlagged() {
-        var single = new LiteralSeq.Single("hello".toCharArray(), false);
+        var single = new LiteralSeq.Single("hello".toCharArray(), true, false);
         assertFalse(single.coversEntirePattern());
     }
 
     @Test
     void alternationCoversEntirePattern() {
         var alt = new LiteralSeq.Alternation(
-                List.of("cat".toCharArray(), "dog".toCharArray()), true);
+                List.of("cat".toCharArray(), "dog".toCharArray()), true, true);
         assertTrue(alt.coversEntirePattern());
     }
 
     @Test
     void alternationDoesNotCoverEntirePattern() {
         var alt = new LiteralSeq.Alternation(
-                List.of("cat".toCharArray(), "dog".toCharArray()), false);
+                List.of("cat".toCharArray(), "dog".toCharArray()), true, false);
         assertFalse(alt.coversEntirePattern());
     }
 }

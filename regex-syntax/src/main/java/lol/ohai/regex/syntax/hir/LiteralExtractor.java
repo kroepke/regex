@@ -15,7 +15,7 @@ public final class LiteralExtractor {
 
     public static LiteralSeq extractPrefixes(Hir hir) {
         return switch (hir) {
-            case Hir.Literal lit -> new LiteralSeq.Single(lit.chars(), true);
+            case Hir.Literal lit -> new LiteralSeq.Single(lit.chars(), true, true);
             case Hir.Capture cap -> {
                 LiteralSeq inner = extractPrefixes(cap.sub());
                 yield inner;
@@ -48,7 +48,7 @@ public final class LiteralExtractor {
             return new LiteralSeq.None();
         }
         char[] merged = mergeCharArrays(parts);
-        return new LiteralSeq.Single(merged, allLiteral);
+        return new LiteralSeq.Single(merged, true, allLiteral);
     }
 
     private static LiteralSeq extractFromAlternation(List<Hir> subs) {
@@ -74,7 +74,7 @@ public final class LiteralExtractor {
                 }
             }
         }
-        return new LiteralSeq.Alternation(literals, allEntire);
+        return new LiteralSeq.Alternation(literals, true, allEntire);
     }
 
     private static Hir unwrapCaptures(Hir hir) {

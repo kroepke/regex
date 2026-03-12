@@ -13,6 +13,15 @@ import java.util.Arrays;
 public sealed interface LiteralSeq {
 
     /**
+     * Whether the extracted literals are exact (i.e., they represent the complete
+     * prefix of the pattern with no approximation). Prefix extraction always
+     * produces exact literals; suffix or inner extraction may not.
+     */
+    default boolean exact() {
+        return false;
+    }
+
+    /**
      * Whether this literal sequence covers the entire pattern,
      * meaning no regex engine is needed for matching.
      */
@@ -24,39 +33,51 @@ public sealed interface LiteralSeq {
     record None() implements LiteralSeq {}
 
     /** A single literal prefix. */
-    record Single(char[] literal, boolean entirePattern) implements LiteralSeq {
+    record Single(char[] literal, boolean exact, boolean entirePattern) implements LiteralSeq {
         public Single {
             Objects.requireNonNull(literal);
         }
 
         @Override
+        public boolean exact() {
+            return exact;
+        }
+
+        @Override
         public boolean coversEntirePattern() {
-            return entirePattern;
+            return exact && entirePattern;
         }
 
         @Override
         public boolean equals(Object o) {
             return o instanceof Single s
                     && Arrays.equals(literal, s.literal)
+                    && exact == s.exact
                     && entirePattern == s.entirePattern;
         }
 
         @Override
         public int hashCode() {
-            return 31 * Arrays.hashCode(literal) + Boolean.hashCode(entirePattern);
+            int h = 31 * Arrays.hashCode(literal) + Boolean.hashCode(exact);
+            return 31 * h + Boolean.hashCode(entirePattern);
         }
     }
 
     /** Multiple alternative literal prefixes. */
-    record Alternation(List<char[]> literals, boolean entirePattern) implements LiteralSeq {
+    record Alternation(List<char[]> literals, boolean exact, boolean entirePattern) implements LiteralSeq {
         public Alternation {
             Objects.requireNonNull(literals);
             literals = List.copyOf(literals);
         }
 
         @Override
+        public boolean exact() {
+            return exact;
+        }
+
+        @Override
         public boolean coversEntirePattern() {
-            return entirePattern;
+            return exact && entirePattern;
         }
     }
 }

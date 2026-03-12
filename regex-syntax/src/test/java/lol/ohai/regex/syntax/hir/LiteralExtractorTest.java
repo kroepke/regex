@@ -160,4 +160,28 @@ class LiteralExtractorTest {
         var result = LiteralExtractor.extractPrefixes(hir);
         assertInstanceOf(LiteralSeq.None.class, result);
     }
+
+    @Test
+    void prefixLiteralsAreExact() {
+        Hir hir = new Hir.Concat(List.of(
+                new Hir.Literal("hello".toCharArray()),
+                new Hir.Repetition(1, Hir.Repetition.UNBOUNDED, true,
+                        new Hir.Class(new ClassUnicode(List.of(new ClassUnicode.ClassUnicodeRange('0', '9')))))
+        ));
+        LiteralSeq result = LiteralExtractor.extractPrefixes(hir);
+        assertInstanceOf(LiteralSeq.Single.class, result);
+        LiteralSeq.Single single = (LiteralSeq.Single) result;
+        assertTrue(single.exact());
+        assertFalse(single.coversEntirePattern());
+    }
+
+    @Test
+    void entirePatternLiteralsAreExact() {
+        Hir hir = new Hir.Literal("hello".toCharArray());
+        LiteralSeq result = LiteralExtractor.extractPrefixes(hir);
+        assertInstanceOf(LiteralSeq.Single.class, result);
+        LiteralSeq.Single single = (LiteralSeq.Single) result;
+        assertTrue(single.exact());
+        assertTrue(single.coversEntirePattern());
+    }
 }
