@@ -22,7 +22,8 @@ import lol.ohai.regex.automata.util.Input;
  * window. When only the forward DFA is available, falls back to two-phase
  * (forward DFA + PikeVM).</p>
  */
-public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
+public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
+        Strategy.ReverseSuffix, Strategy.ReverseInner {
 
     Cache createCache();
     boolean isMatch(Input input, Cache cache);
@@ -47,7 +48,8 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
                     pikeVM.createCache(),
                     forwardDFA != null ? forwardDFA.createCache() : null,
                     reverseDFA != null ? reverseDFA.createCache() : null,
-                    backtracker != null ? backtracker.createCache() : null
+                    backtracker != null ? backtracker.createCache() : null,
+                    null  // prefixReverseDFACache — not used by Core
             );
         }
 
@@ -177,14 +179,7 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
          * is unavailable.
          */
         private Captures captureEngine(Input narrowed, Cache cache) {
-            if (backtracker != null) {
-                int windowLen = narrowed.end() - narrowed.start();
-                if (windowLen <= backtracker.maxHaystackLen()) {
-                    Captures caps = backtracker.searchCaptures(narrowed, cache.backtrackerCache());
-                    if (caps != null) return caps;
-                }
-            }
-            return pikeVM.searchCaptures(narrowed, cache.pikeVMCache());
+            return Strategy.doCaptureEngine(narrowed, cache, pikeVM, backtracker);
         }
 
         private Captures prefilterLoop(Input input, Cache cache,
@@ -246,6 +241,40 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
         }
     }
 
+    record ReverseSuffix(PikeVM pikeVM, LazyDFA forwardDFA, LazyDFA reverseDFA,
+                         Prefilter suffixPrefilter, BoundedBacktracker backtracker) implements Strategy {
+        @Override public Cache createCache() { throw new UnsupportedOperationException("TODO"); }
+        @Override public boolean isMatch(Input input, Cache cache) { throw new UnsupportedOperationException("TODO"); }
+        @Override public Captures search(Input input, Cache cache) { throw new UnsupportedOperationException("TODO"); }
+        @Override public Captures searchCaptures(Input input, Cache cache) { throw new UnsupportedOperationException("TODO"); }
+    }
+
+    record ReverseInner(PikeVM pikeVM, LazyDFA forwardDFA, LazyDFA prefixReverseDFA,
+                        Prefilter innerPrefilter, BoundedBacktracker backtracker) implements Strategy {
+        @Override public Cache createCache() { throw new UnsupportedOperationException("TODO"); }
+        @Override public boolean isMatch(Input input, Cache cache) { throw new UnsupportedOperationException("TODO"); }
+        @Override public Captures search(Input input, Cache cache) { throw new UnsupportedOperationException("TODO"); }
+        @Override public Captures searchCaptures(Input input, Cache cache) { throw new UnsupportedOperationException("TODO"); }
+    }
+
+    /**
+     * Selects the best capture engine for the given narrowed window.
+     * Prefers the bounded backtracker for small windows (faster than PikeVM
+     * for captures); falls back to PikeVM for larger windows or when the
+     * backtracker is unavailable.
+     */
+    static Captures doCaptureEngine(Input narrowed, Cache cache,
+                                    PikeVM pikeVM, BoundedBacktracker backtracker) {
+        if (backtracker != null) {
+            int windowLen = narrowed.end() - narrowed.start();
+            if (windowLen <= backtracker.maxHaystackLen()) {
+                Captures caps = backtracker.searchCaptures(narrowed, cache.backtrackerCache());
+                if (caps != null) return caps;
+            }
+        }
+        return pikeVM.searchCaptures(narrowed, cache.pikeVMCache());
+    }
+
     /**
      * Per-search mutable state. Wraps a PikeVM cache and optional forward/reverse
      * LazyDFA caches. {@code EMPTY} is used by {@link PrefilterOnly} which needs
@@ -255,8 +284,9 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
             lol.ohai.regex.automata.nfa.thompson.pikevm.Cache pikeVMCache,
             DFACache forwardDFACache,
             DFACache reverseDFACache,
-            lol.ohai.regex.automata.nfa.thompson.backtrack.BoundedBacktracker.Cache backtrackerCache
+            lol.ohai.regex.automata.nfa.thompson.backtrack.BoundedBacktracker.Cache backtrackerCache,
+            DFACache prefixReverseDFACache
     ) {
-        static final Cache EMPTY = new Cache(null, null, null, null);
+        static final Cache EMPTY = new Cache(null, null, null, null, null);
     }
 }
