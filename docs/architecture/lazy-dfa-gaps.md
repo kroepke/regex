@@ -4,16 +4,14 @@ This document tracks features intentionally deferred from the initial lazy DFA i
 
 See `docs/superpowers/specs/2026-03-11-lazy-dfa-design.md` for the initial design spec.
 
-## Reverse DFA — Partially Implemented
+## Reverse DFA — Implemented
 
-**What:** A DFA that searches backwards through the input to find match start positions.
+**Status: DONE** (2026-03-12)
 
-**Status:** The reverse NFA compiler (`Compiler.compileReverse()`), reverse DFA search (`LazyDFA.searchRev()`), and `Strategy.Core` wiring are implemented. However, the three-phase search path (forward DFA → reverse DFA → direct result without PikeVM) is **not active** because the forward DFA overestimates match end for lazy quantifier and empty-alternative patterns (see "DFA Lazy Quantifier Limitation" below). The current `search()` path uses two-phase: forward DFA narrows the window, PikeVM finds the exact match.
+The reverse NFA compiler (`Compiler.compileReverse()`), reverse DFA search (`LazyDFA.searchRev()`), and `Strategy.Core` wiring are fully implemented. Three-phase search is active: forward DFA finds match end → reverse DFA finds match start → capture engine (bounded backtracker or PikeVM) runs on the narrowed window.
 
 **Remaining work:**
-- Activate three-phase search once the forward DFA correctly handles lazy quantifiers
 - Suffix and inner literal prefilter strategies that use the reverse DFA as primary search driver
-- These strategies will use the reverse NFA's unanchored start state
 
 **Design spec:** `docs/superpowers/specs/2026-03-11-reverse-dfa-design.md`
 
@@ -39,17 +37,13 @@ See `docs/superpowers/specs/2026-03-11-lazy-dfa-design.md` for the initial desig
 
 **Complexity:** Low. The search loop tracks state differently — doesn't reset on match, continues from match position.
 
-## Quit Bytes
+## Quit Chars — Implemented
 
-**What:** Configure specific byte/char values that cause the DFA to immediately give up and fall back.
+**Status: DONE** (2026-03-12)
 
-**Why it matters:** Useful for patterns that are ASCII-only — non-ASCII chars can trigger a quit, avoiding DFA state explosion on Unicode input. The upstream uses this for `\b` (Unicode word boundary) which would require enormous state sets to handle in the DFA.
+Quit chars allow the DFA to handle the ASCII portions of patterns with Unicode word boundaries. When the DFA encounters a quit char (non-ASCII for Unicode word boundary patterns), it returns `GaveUp` and falls back to PikeVM for that search. This improved the `unicodeWord` benchmark from 3,252x slower to 2.0x slower than JDK.
 
-**Current state:** The DFA currently bails out entirely (returns null from `LazyDFA.create()`) for patterns with unsupported look kinds (Unicode word boundaries, CRLF line anchors). A more fine-grained approach using quit bytes would allow the DFA to handle the ASCII portions of these patterns and only quit at specific char values.
-
-**When to add:** When we observe specific patterns where the full bail-out is too conservative and a quit-byte approach would let the DFA handle more of the search.
-
-**Complexity:** Low. Add a `BitSet` of quit chars, check in the search loop before the transition.
+Implementation: `CharClasses` tracks quit chars via `quitNonAscii` flag, `LazyDFA` returns `SearchResult.GaveUp` on quit transitions, `Strategy.Core` handles `GaveUp` by falling back to PikeVM.
 
 ## Per-Pattern Start States
 
@@ -80,6 +74,14 @@ The lazy DFA now encodes look-behind context (`lookHave`, `lookNeed`, `isFromWor
 **Supported look kinds:** `START_TEXT`, `END_TEXT`, `START_LINE`, `END_LINE`, `WORD_BOUNDARY_ASCII`, `WORD_BOUNDARY_ASCII_NEGATE`, `WORD_START_ASCII`, `WORD_END_ASCII`, `WORD_START_HALF_ASCII`, `WORD_END_HALF_ASCII`.
 
 **Unsupported (DFA bails to PikeVM):** `WORD_BOUNDARY_UNICODE`, `WORD_BOUNDARY_UNICODE_NEGATE`, `WORD_START_UNICODE`, `WORD_END_UNICODE`, `WORD_START_HALF_UNICODE`, `WORD_END_HALF_UNICODE`, `START_LINE_CRLF`, `END_LINE_CRLF`. These require Unicode word-char property tables or CRLF-specific handling that the DFA's compact character classification doesn't support.
+
+## Bounded Backtracker — Implemented
+
+**Status: DONE** (2026-03-12)
+
+The bounded backtracker is an NFA backtracking engine bounded by a visited bitset of `(stateId, offset)` pairs, guaranteeing O(m×n) worst-case time. It's used as the preferred capture engine for small match windows (determined by `maxHaystackLen` based on NFA state count and a 256KB visited budget). Falls back to PikeVM for larger windows.
+
+Implementation: `BoundedBacktracker` in `regex-automata/src/main/java/lol/ohai/regex/automata/nfa/thompson/backtrack/`. Integrated into `Strategy.Core.captureEngine()`.
 
 ## Anchored Start State Optimization — Implemented
 

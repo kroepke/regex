@@ -66,11 +66,48 @@ Patterns that cause catastrophic backtracking in java.util.regex:
 | `quadratic1000Ohai/Jdk` | `.*[^A-Z]\|[A-Z]` | 1000 A's | Quadratic behavior |
 | `backtrackOhai/Jdk` | `(a+)+b` | 25 a's | Classic backtracking |
 
-## Results (2026-03-11, post reverse DFA)
+## Results (2026-03-12, post search throughput improvements)
 
-*Note: This run was on different hardware than the previous results. Absolute ops/s values are not comparable across runs — use the ohai/JDK ratio (same-run comparison) to assess relative performance.*
+*Quit chars, three-phase search, and bounded backtracker.*
 
 ### Search throughput (ops/s, higher is better)
+
+| Benchmark | ohai | JDK | Ratio | Change |
+|---|---|---|---|---|
+| literal | **5,275** | 3,529 | **1.5x faster** | unchanged (PrefilterOnly) |
+| charClass | 79.0 | 320 | 4.0x slower | **10x improvement** (DFA handles more) |
+| alternation | 50.8 | 82.8 | 1.6x slower | improved (was 2.2x slower) |
+| captures | 513 | 17,250 | 33.6x slower | **~10x improvement** (three-phase + backtracker) |
+| unicodeWord | **17,983** | 35,724 | 2.0x slower | **~1,600x improvement** (quit chars) |
+
+### Pathological patterns (ops/s, higher is better)
+
+| Benchmark | ohai | JDK | Ratio | Change |
+|---|---|---|---|---|
+| backtrack `(a+)+b` | **18,033K** | 247K | **73x faster** | unchanged |
+| redosShort | **2,716K** | 102K | **27x faster** | **massive** (was 2.7x slower) |
+| redosLong (900KB) | **28,394** | N/A (hangs) | **ohai wins** | unchanged |
+| quadratic100 | 89,010 | 123,707 | 1.4x slower | **5.6x improvement** (was 7.9x slower) |
+| quadratic1000 | 1,376 | 1,556 | 1.1x slower | improved (was 1.9x slower) |
+
+### Compilation (ops/s, higher is better)
+
+Compilation now includes forward DFA, reverse DFA, and BoundedBacktracker per pattern.
+
+| Benchmark | ohai | JDK | Ratio |
+|---|---|---|---|
+| simple | 41.6K | 11,253K | 271x slower |
+| medium | 11.6K | 8,321K | 718x slower |
+| complex | 40.3K | 13,594K | 337x slower |
+| unicode | 4.1K | 19,671K | 4,820x slower |
+| alternation | 35.3K | 4,102K | 116x slower |
+
+### Previous results (2026-03-11, post reverse DFA)
+
+<details>
+<summary>Click to expand (different hardware — ratios only comparable within same run)</summary>
+
+#### Search throughput
 
 | Benchmark | ohai | JDK | Ratio | Change |
 |---|---|---|---|---|
@@ -80,7 +117,7 @@ Patterns that cause catastrophic backtracking in java.util.regex:
 | captures | 19.8 | 6,230 | 315x slower | unchanged (DFA give-up) |
 | unicodeWord | 4.4 | 14,211 | 3,252x slower | unchanged (DFA give-up) |
 
-### Pathological patterns (ops/s, higher is better)
+#### Pathological patterns
 
 | Benchmark | ohai | JDK | Ratio | Change |
 |---|---|---|---|---|
@@ -90,9 +127,7 @@ Patterns that cause catastrophic backtracking in java.util.regex:
 | quadratic100 | 6,536 | 51,664 | 7.9x slower | unchanged |
 | quadratic1000 | 345 | 642 | 1.9x slower | unchanged |
 
-### Compilation (ops/s, higher is better)
-
-Reverse DFA compilation adds a second NFA + CharClasses + LazyDFA per pattern (skipped for patterns with look-assertions where the DFA bails out).
+#### Compilation
 
 | Benchmark | ohai | JDK | Ratio |
 |---|---|---|---|
@@ -101,6 +136,8 @@ Reverse DFA compilation adds a second NFA + CharClasses + LazyDFA per pattern (s
 | complex | 32.3K | 4,420K | 137x slower |
 | unicode | 1.4K | 6,777K | 4,841x slower |
 | alternation | 14.4K | 1,334K | 92x slower |
+
+</details>
 
 ### Previous results (2026-03-11, post lazy DFA, pre reverse DFA)
 
@@ -178,36 +215,41 @@ Reverse DFA compilation adds a second NFA + CharClasses + LazyDFA per pattern (s
 
 ## Analysis
 
-### Reverse DFA impact (2026-03-11)
+### Search throughput improvements (2026-03-12)
 
-The reverse DFA infrastructure is in place but **does not yet affect search performance**. The three-phase search (forward DFA → reverse DFA → done without PikeVM) is not active because the forward DFA overestimates match end for lazy quantifier and empty-alternative patterns (see `docs/architecture/lazy-dfa-gaps.md`). The current search path remains two-phase: forward DFA narrows the window, PikeVM finds the exact match.
+Three changes drove major search throughput gains:
 
-#### Why search benchmarks are unchanged
+1. **Quit chars** — Instead of bailing out entirely for Unicode word boundary patterns, the DFA now designates non-ASCII chars as "quit" triggers and falls back to PikeVM only at those points. The `unicodeWord` benchmark improved from 3,252x slower to just **2.0x slower** — a ~1,600x improvement in the ohai/JDK ratio.
 
-The reverse DFA doesn't participate in the search path yet. All search and pathological benchmark ratios are consistent with previous results (within hardware variance).
+2. **Three-phase search** — Forward DFA finds match end → reverse DFA finds match start → capture engine on narrowed window. This avoids running PikeVM/backtracker over the full haystack. The `captures` benchmark improved from 315x slower to **33.6x slower**.
 
-#### Compilation cost increased
+3. **Bounded backtracker** — For small match windows, the backtracker (O(m×n) with low constant factor) is faster than PikeVM for captures. Combined with three-phase narrowing, this accelerates capture-heavy patterns.
 
-Adding a reverse NFA + CharClasses + LazyDFA per pattern roughly doubles the compilation work for patterns without look-assertions. Patterns with ASCII-only look-assertions (e.g., `^`, `$`, `(?-u:\b)`) now build both forward and reverse DFAs. Patterns with Unicode word boundaries or CRLF line anchors still skip DFA compilation.
+#### Pathological pattern improvements
+
+The `redosShort` benchmark (`.*.*=.*` on 100 chars) improved from 2.7x slower to **27x faster than JDK**. The `quadratic` patterns also improved significantly (7.9x → 1.4x slower for 100 chars, 1.9x → 1.1x slower for 1000 chars). These improvements come from the DFA handling more of the search before falling back.
 
 ### Where ohai wins
 
 - **Literal search**: **1.5x faster than JDK** via `PrefilterOnly` strategy (pure `String.indexOf()`)
-- **Backtracking safety**: **129x faster than JDK** on `(a+)+b` — linear-time guarantee vs JDK's exponential backtracking
-- **ReDoS immunity**: 900KB haystack with `.*.*=.*` completes; JDK hangs indefinitely
+- **Backtracking safety**: **73x faster than JDK** on `(a+)+b` — linear-time guarantee vs JDK's exponential backtracking
+- **ReDoS immunity**: 900KB haystack with `.*.*=.*` completes at 28K ops/s; JDK hangs indefinitely
+- **ReDoS short**: **27x faster than JDK** on `.*.*=.*` with 100-char input
 
 ### Roadmap to competitive throughput
 
-To close the remaining gap with JDK for Unicode-heavy patterns:
+Remaining gaps and optimizations:
 
-1. ~~**Look-around encoding in DFA states**~~ — **DONE** (2026-03-11). The DFA now handles `^`, `$`, `(?m)^`, `(?m)$`, and ASCII word boundaries (`(?-u:\b)`, `(?-u:\B)`) inline. Unicode word boundaries and CRLF line anchors still bail out to PikeVM. The current search benchmarks don't exercise look-assertion patterns so no throughput change is visible, but patterns like `^abc` and `(?m)^line$` now benefit from DFA acceleration.
-2. **Suffix/inner literal prefilters** — patterns like `\w+\s+Holmes` have an extractable literal suffix. The reverse DFA infrastructure is now in place for this. This is the next highest-impact optimization.
-3. **Three-phase search activation** — requires HIR-level analysis to determine when lazy/greedy semantics don't affect match span, so the reverse DFA can safely replace PikeVM for start-position finding.
-4. **Quit bytes** — instead of bailing out entirely for Unicode word boundaries, designate rare char values as "quit" triggers and fall back to PikeVM only at those points, keeping the DFA for the common case.
-5. **One-pass DFA** — for simple patterns that can be matched in a single left-to-right pass with captures.
-6. **Aho-Corasick** — for alternations with many branches (>10), more efficient than multi-`indexOf`.
-7. **SIMD acceleration** — Java's Vector API or `MemorySegment` for vectorized literal scanning.
+1. ~~**Look-around encoding in DFA states**~~ — **DONE** (2026-03-11).
+2. ~~**Quit chars**~~ — **DONE** (2026-03-12). DFA handles ASCII portions of Unicode word boundary patterns.
+3. ~~**Three-phase search**~~ — **DONE** (2026-03-12). Forward DFA → reverse DFA → capture engine.
+4. ~~**Bounded backtracker**~~ — **DONE** (2026-03-12). Preferred capture engine for small windows.
+5. **Suffix/inner literal prefilters** — patterns like `\w+\s+Holmes` have an extractable literal suffix. This is the next highest-impact optimization for closing the `captures` gap.
+6. **One-pass DFA** — for simple patterns that can be matched in a single left-to-right pass with captures.
+7. **Aho-Corasick** — for alternations with many branches (>10), more efficient than multi-`indexOf`.
+8. **SIMD acceleration** — Java's Vector API or `MemorySegment` for vectorized literal scanning.
+9. **Search loop unrolling** — process 4 chars at a time in the DFA hot loop (~30-50% throughput improvement per upstream).
 
 ### Compilation cost
 
-The `medium` and `unicode` compilation benchmarks are notably slow due to Unicode character class expansion. The `\d` class in Unicode mode expands to hundreds of ranges, each generating NFA states. Adding reverse DFA compilation roughly doubles this cost. The Rust crate addresses this with range tree compaction and DFA minimization. Our immediate path: cache compiled NFAs (the Regex class already does this for search, but the benchmark measures cold compilation).
+The `medium` and `unicode` compilation benchmarks are notably slow due to Unicode character class expansion. The `\d` class in Unicode mode expands to hundreds of ranges, each generating NFA states. Compilation now includes forward DFA, reverse DFA, and BoundedBacktracker per pattern. The Rust crate addresses this with range tree compaction and DFA minimization. Our immediate path: cache compiled NFAs (the Regex class already does this for search, but the benchmark measures cold compilation).
