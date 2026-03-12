@@ -152,6 +152,20 @@ class MetaEngineTest {
         assertEquals(5, match.get().end());
     }
 
+    // -- Three-phase search with captures --
+
+    @Test
+    void threePhaseSearchCapturesNarrowsWindow() {
+        Regex regex = Regex.compile("(\\d{4})-(\\d{2})-(\\d{2})");
+        var result = regex.captures("filed on 2024-03-14 done");
+        assertTrue(result.isPresent());
+        var caps = result.get();
+        assertEquals("2024-03-14", caps.group(0).get().text());
+        assertEquals("2024", caps.group(1).get().text());
+        assertEquals("03", caps.group(2).get().text());
+        assertEquals("14", caps.group(3).get().text());
+    }
+
     // -- Edge cases --
 
     @Test

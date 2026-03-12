@@ -36,7 +36,7 @@ public final class StateContent {
         return h;
     }
 
-    /** Returns the sorted NFA state IDs. MUST NOT be mutated. */
+    /** Returns the NFA state IDs in insertion order. MUST NOT be mutated. */
     public int[] nfaStates() { return nfaStates; }
     public boolean isMatch() { return isMatch; }
     public boolean isFromWord() { return isFromWord; }

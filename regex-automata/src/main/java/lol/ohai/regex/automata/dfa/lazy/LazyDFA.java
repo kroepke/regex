@@ -281,7 +281,7 @@ public final class LazyDFA {
         cache.nfaStateSet.clear();
         cache.closureLookNeed = 0;
         boolean hasMatch = epsilonClosure(cache, nfaStartId, lookHave);
-        int[] nfaStates = collectSorted(cache);
+        int[] nfaStates = collect(cache);
         if (nfaStates.length == 0) return DFACache.dead(charClasses.stride());
 
         StateContent content = new StateContent(nfaStates, hasMatch,
@@ -333,7 +333,7 @@ public final class LazyDFA {
                 for (int nfaStateId : sourceNfaStates) {
                     epsilonClosure(cache, nfaStateId, lookHave);
                 }
-                sourceNfaStates = collectSorted(cache);
+                sourceNfaStates = collect(cache);
                 cache.nfaStateSet.clear();
                 cache.closureLookNeed = 0;
             }
@@ -429,7 +429,7 @@ public final class LazyDFA {
             if (isMatch) break;
         }
 
-        int[] nfaStates = collectSorted(cache);
+        int[] nfaStates = collect(cache);
 
         // Check if destination NFA states include a Match
         boolean destHasMatch = false;
@@ -620,14 +620,27 @@ public final class LazyDFA {
         return java.util.Arrays.copyOf(stack, stack.length * 2);
     }
 
-    /** Collect the NFA state set into a sorted array. */
-    private int[] collectSorted(DFACache cache) {
+    /**
+     * Collect the NFA state set into an array, preserving insertion order.
+     *
+     * <p>Insertion order is critical for leftmost-first match semantics: the
+     * epsilon closure's DFS traversal visits pattern-continuation states before
+     * unanchored-prefix states (via {@link State.BinaryUnion}'s alt1-first
+     * ordering). When {@code computeNextState} iterates this array and breaks
+     * at the first Match state, the insertion order ensures that continuation
+     * states are processed (extending the current match) while unanchored-prefix
+     * states after Match are skipped (preventing new match attempts from
+     * polluting the successor state).</p>
+     *
+     * <p>This matches the upstream Rust regex crate's use of a SparseSet with
+     * insertion-order iteration in the determinization loop.</p>
+     */
+    private int[] collect(DFACache cache) {
         int size = cache.nfaStateSet.size();
         int[] result = new int[size];
         for (int i = 0; i < size; i++) {
             result[i] = cache.nfaStateSet.get(i);
         }
-        Arrays.sort(result);
         return result;
     }
 }
