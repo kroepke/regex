@@ -99,13 +99,13 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
         public Captures search(Input input, Cache cache) {
             if (prefilter != null && !input.isAnchored()) {
                 if (forwardDFA != null) {
-                    return prefilterLoop(input, cache, (in, c) -> dfaTwoPhaseSearch(in, c));
+                    return prefilterLoop(input, cache, (in, c) -> dfaSearch(in, c));
                 }
                 return prefilterLoop(input, cache,
                         (in, c) -> pikeVM.search(in, c.pikeVMCache()));
             }
             if (forwardDFA != null) {
-                return dfaTwoPhaseSearch(input, cache);
+                return dfaSearch(input, cache);
             }
             return pikeVM.search(input, cache.pikeVMCache());
         }
@@ -126,21 +126,54 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly {
             return pikeVM.searchCaptures(input, cache.pikeVMCache());
         }
 
-        private Captures dfaTwoPhaseSearch(Input input, Cache cache) {
+        private Captures dfaSearch(Input input, Cache cache) {
             SearchResult fwdResult = forwardDFA.searchFwd(input, cache.forwardDFACache());
             return switch (fwdResult) {
-                case SearchResult.Match m -> {
-                    // Forward DFA narrows the search window. PikeVM finds the exact
-                    // match with correct semantics (lazy quantifiers, alternation
-                    // preference). The reverse DFA is not used here because the forward
-                    // DFA may overestimate the match end for lazy/empty-alternative
-                    // patterns, which would cause the reverse DFA to compute an
-                    // incorrect start position.
-                    Input narrowed = input.withBounds(input.start(), m.offset(), input.isAnchored());
-                    yield pikeVM.search(narrowed, cache.pikeVMCache());
-                }
                 case SearchResult.NoMatch n -> null;
                 case SearchResult.GaveUp g -> pikeVM.search(input, cache.pikeVMCache());
+                case SearchResult.Match m -> dfaSearchReverse(input, cache, m.offset());
+            };
+        }
+
+        private Captures dfaSearchReverse(Input input, Cache cache, int matchEnd) {
+            // Empty match: start == end, no reverse search needed
+            if (matchEnd == input.start()) {
+                Captures caps = new Captures(1);
+                caps.set(0, matchEnd);
+                caps.set(1, matchEnd);
+                return caps;
+            }
+
+            // Anchored search: start is fixed at input.start()
+            if (input.isAnchored()) {
+                Captures caps = new Captures(1);
+                caps.set(0, input.start());
+                caps.set(1, matchEnd);
+                return caps;
+            }
+
+            // No reverse DFA: fall back to PikeVM on narrowed window
+            if (reverseDFA == null) {
+                Input narrowed = input.withBounds(input.start(), matchEnd, false);
+                return pikeVM.search(narrowed, cache.pikeVMCache());
+            }
+
+            // Three-phase: reverse DFA finds start
+            Input revInput = input.withBounds(input.start(), matchEnd, true);
+            SearchResult revResult = reverseDFA.searchRev(revInput, cache.reverseDFACache());
+            return switch (revResult) {
+                case SearchResult.Match rm -> {
+                    Captures caps = new Captures(1);
+                    caps.set(0, rm.offset());
+                    caps.set(1, matchEnd);
+                    yield caps;
+                }
+                case SearchResult.GaveUp g -> {
+                    Input narrowed = input.withBounds(input.start(), matchEnd, false);
+                    yield pikeVM.search(narrowed, cache.pikeVMCache());
+                }
+                case SearchResult.NoMatch n ->
+                    throw new IllegalStateException("reverse DFA found no match after forward match");
             };
         }
 

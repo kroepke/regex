@@ -121,6 +121,37 @@ class MetaEngineTest {
         assertEquals("Hello", m.get().text());
     }
 
+    // -- Three-phase search (forward DFA + reverse DFA) --
+
+    @Test
+    void threePhaseSearchReturnsCorrectBounds() {
+        Regex regex = Regex.compile("[a-z]+");
+        List<Match> matches = regex.findAll("hello world").toList();
+        assertEquals(2, matches.size());
+        assertEquals(0, matches.get(0).start());
+        assertEquals(5, matches.get(0).end());
+        assertEquals(6, matches.get(1).start());
+        assertEquals(11, matches.get(1).end());
+    }
+
+    @Test
+    void threePhaseSearchEmptyMatch() {
+        Regex regex = Regex.compile("a*");
+        var match = regex.find("bbb");
+        assertTrue(match.isPresent());
+        assertEquals(0, match.get().start());
+        assertEquals(0, match.get().end());
+    }
+
+    @Test
+    void threePhaseSearchAnchored() {
+        Regex regex = Regex.compile("^[a-z]+");
+        var match = regex.find("hello world");
+        assertTrue(match.isPresent());
+        assertEquals(0, match.get().start());
+        assertEquals(5, match.get().end());
+    }
+
     // -- Edge cases --
 
     @Test
