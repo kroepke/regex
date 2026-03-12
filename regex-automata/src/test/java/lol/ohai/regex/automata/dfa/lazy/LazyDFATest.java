@@ -143,11 +143,25 @@ class LazyDFATest {
     }
 
     @Test
-    void bailsOutForUnicodeWordBoundary() {
-        // Unicode word boundaries require Unicode word-char tables the DFA lacks
+    void unicodeWordBoundaryNoLongerBailsOut() {
         for (String pattern : List.of("\\bfoo\\b", "\\Binner\\B")) {
-            assertNull(buildDFA(pattern), "DFA should bail out for: " + pattern);
+            assertNotNull(buildDFAWithQuit(pattern),
+                    "DFA should be created with quit chars for: " + pattern);
         }
+    }
+
+    @Test
+    void unicodeWordBoundaryUsesQuit() {
+        var dfa = buildDFAWithQuit("\\b\\w+\\b");
+        assertNotNull(dfa, "DFA should be created with quit chars for Unicode word boundary");
+
+        // ASCII-only input: DFA handles it entirely
+        var result = dfa.searchFwd(Input.of("hello world"), dfa.createCache());
+        assertInstanceOf(SearchResult.Match.class, result);
+
+        // Input with non-ASCII: DFA should give up at the non-ASCII char
+        var result2 = dfa.searchFwd(Input.of("caf\u00e9"), dfa.createCache());
+        assertTrue(result2 instanceof SearchResult.Match || result2 instanceof SearchResult.GaveUp);
     }
 
     @Test
@@ -305,6 +319,19 @@ class LazyDFATest {
         assertNotNull(dfa, "pattern should not bail out: " + pattern);
         var cache = dfa.createCache();
         return dfa.searchFwd(Input.of(haystack), cache);
+    }
+
+    private static LazyDFA buildDFAWithQuit(String pattern) {
+        try {
+            Ast ast = Parser.parse(pattern, 250);
+            Hir hir = Translator.translate(pattern, ast);
+            NFA nfa = Compiler.compile(hir);
+            boolean quitNonAscii = nfa.lookSetAny().containsUnicodeWord();
+            CharClasses cc = CharClassBuilder.build(nfa, quitNonAscii);
+            return LazyDFA.create(nfa, cc);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to compile: " + pattern, e);
+        }
     }
 
     private static LazyDFA buildDFA(String pattern) {

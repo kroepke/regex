@@ -55,7 +55,7 @@ public final class LazyDFA {
      * Unicode word boundaries, CRLF-aware line anchors).
      */
     public static LazyDFA create(NFA nfa, CharClasses charClasses) {
-        if (nfa.lookSetAny().containsUnsupportedByDFA()) {
+        if (nfa.lookSetAny().containsBailOutByDFA()) {
             return null;
         }
         return new LazyDFA(nfa, charClasses);
@@ -279,6 +279,16 @@ public final class LazyDFA {
         StateContent content = new StateContent(nfaStates, hasMatch,
                 isFromWord, isHalfCrlf, lookHave.bits(), cache.closureLookNeed);
         int sid = cache.allocateState(content);
+        // Overwrite transitions for quit char classes
+        if (charClasses.hasQuitClasses()) {
+            int rawSid = sid & 0x7FFF_FFFF;
+            int quitSid = DFACache.quit(charClasses.stride());
+            for (int cls = 0; cls < charClasses.classCount(); cls++) {
+                if (charClasses.isQuitClass(cls)) {
+                    cache.setTransition(rawSid, cls, quitSid);
+                }
+            }
+        }
         // Strip the match flag — start states must not be match states (delay by 1).
         return sid & 0x7FFF_FFFF;
     }
@@ -432,6 +442,16 @@ public final class LazyDFA {
         StateContent content = new StateContent(nfaStates, destHasMatch,
                 destIsFromWord, destIsHalfCrlf, destLookHave, cache.closureLookNeed);
         int sid = allocateOrGiveUp(cache, content);
+        // Overwrite transitions for quit char classes
+        if (charClasses.hasQuitClasses()) {
+            int rawSid = sid & 0x7FFF_FFFF;
+            int quitSid = DFACache.quit(charClasses.stride());
+            for (int cls = 0; cls < charClasses.classCount(); cls++) {
+                if (charClasses.isQuitClass(cls)) {
+                    cache.setTransition(rawSid, cls, quitSid);
+                }
+            }
+        }
         if (isMatch) {
             sid = sid | DFACache.MATCH_FLAG;
         }
