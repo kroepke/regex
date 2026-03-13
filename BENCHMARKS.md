@@ -37,10 +37,10 @@ Throughput search on a ~900KB haystack (`rebar/benchmarks/haystacks/opensubtitle
 | Benchmark | Pattern | Notes |
 |---|---|---|
 | `literalOhai/Jdk` | `Sherlock Holmes` | Literal substring search |
-| `charClassOhai/Jdk` | `[A-Z][a-z]+\\s[A-Z][a-z]+` | Character class + repetition |
-| `alternationOhai/Jdk` | `Sherlock\|Watson\|Holmes\|...` | Multi-literal alternation |
-| `capturesOhai/Jdk` | `(?P<first>[A-Z][a-z]+)\\s(?P<last>[A-Z][a-z]+)` | Named capture groups |
-| `unicodeWordOhai/Jdk` | `\\w+\\s+Holmes` | Unicode word class |
+| `charClassOhai/Jdk` | `[a-zA-Z]+` | Character class + repetition |
+| `alternationOhai/Jdk` | `Sherlock\|Watson\|Holmes\|Irene` | Multi-literal alternation |
+| `capturesOhai/Jdk` | `(\\d{4})-(\\d{2})-(\\d{2})` | Date capture groups |
+| `unicodeWordOhai/Jdk` | `\\w+` | Unicode word class |
 
 ### CompileBenchmark
 
@@ -66,11 +66,50 @@ Patterns that cause catastrophic backtracking in java.util.regex:
 | `quadratic1000Ohai/Jdk` | `.*[^A-Z]\|[A-Z]` | 1000 A's | Quadratic behavior |
 | `backtrackOhai/Jdk` | `(a+)+b` | 25 a's | Classic backtracking |
 
-## Results (2026-03-12, post search throughput improvements)
+## Results (2026-03-13, post suffix/inner prefilter)
+
+*Suffix and inner literal prefilters with ReverseSuffix/ReverseInner strategies.*
+
+### Search throughput (ops/s, higher is better)
+
+| Benchmark | ohai | JDK | Ratio |
+|---|---|---|---|
+| literal | **4,876** | 3,440 | **1.4x faster** |
+| charClass | 12.0 | 251 | 20.9x slower |
+| alternation | 47.2 | 111 | 2.3x slower |
+| captures | 122 | 20,351 | 167x slower |
+| unicodeWord | 13.1 | 40,649 | 3,102x slower |
+
+### Pathological patterns (ops/s, higher is better)
+
+| Benchmark | ohai | JDK | Ratio |
+|---|---|---|---|
+| backtrack `(a+)+b` | **153,187K** | 228K | **671x faster** |
+| redosShort | 36,572 | 100,005 | 2.7x slower |
+| redosLong (900KB) | **409** | N/A (hangs) | **ohai wins** |
+| quadratic100 | 21,520 | 121,021 | 5.6x slower |
+| quadratic1000 | 877 | 1,513 | 1.7x slower |
+
+### Compilation (ops/s, higher is better)
+
+Compilation now includes forward DFA, reverse DFA, BoundedBacktracker, and suffix/inner extraction per pattern.
+
+| Benchmark | ohai | JDK | Ratio |
+|---|---|---|---|
+| simple | 39.4K | 10,950K | 278x slower |
+| medium | 11.2K | 8,009K | 715x slower |
+| complex | 38.8K | 12,771K | 329x slower |
+| unicode | 3.9K | 19,289K | 4,946x slower |
+| alternation | 34.0K | 4,002K | 118x slower |
+
+### Previous results (2026-03-12, post search throughput improvements)
+
+<details>
+<summary>Click to expand (different hardware — ratios only comparable within same run)</summary>
 
 *Quit chars, three-phase search, and bounded backtracker.*
 
-### Search throughput (ops/s, higher is better)
+#### Search throughput
 
 | Benchmark | ohai | JDK | Ratio | Change |
 |---|---|---|---|---|
@@ -80,7 +119,7 @@ Patterns that cause catastrophic backtracking in java.util.regex:
 | captures | 513 | 17,250 | 33.6x slower | **~10x improvement** (three-phase + backtracker) |
 | unicodeWord | **17,983** | 35,724 | 2.0x slower | **~1,600x improvement** (quit chars) |
 
-### Pathological patterns (ops/s, higher is better)
+#### Pathological patterns
 
 | Benchmark | ohai | JDK | Ratio | Change |
 |---|---|---|---|---|
@@ -90,9 +129,7 @@ Patterns that cause catastrophic backtracking in java.util.regex:
 | quadratic100 | 89,010 | 123,707 | 1.4x slower | **5.6x improvement** (was 7.9x slower) |
 | quadratic1000 | 1,376 | 1,556 | 1.1x slower | improved (was 1.9x slower) |
 
-### Compilation (ops/s, higher is better)
-
-Compilation now includes forward DFA, reverse DFA, and BoundedBacktracker per pattern.
+#### Compilation
 
 | Benchmark | ohai | JDK | Ratio |
 |---|---|---|---|
@@ -101,6 +138,8 @@ Compilation now includes forward DFA, reverse DFA, and BoundedBacktracker per pa
 | complex | 40.3K | 13,594K | 337x slower |
 | unicode | 4.1K | 19,671K | 4,820x slower |
 | alternation | 35.3K | 4,102K | 116x slower |
+
+</details>
 
 ### Previous results (2026-03-11, post reverse DFA)
 
@@ -215,19 +254,23 @@ Compilation now includes forward DFA, reverse DFA, and BoundedBacktracker per pa
 
 ## Analysis
 
-### Search throughput improvements (2026-03-12)
+### Suffix/inner literal prefilters (2026-03-13)
 
-Three changes drove major search throughput gains:
+Two new strategy variants added to the meta engine:
 
-1. **Quit chars** — Instead of bailing out entirely for Unicode word boundary patterns, the DFA now designates non-ASCII chars as "quit" triggers and falls back to PikeVM only at those points. The `unicodeWord` benchmark improved from 3,252x slower to just **2.0x slower** — a ~1,600x improvement in the ohai/JDK ratio.
+1. **ReverseSuffix** — Extracts a suffix literal from the pattern end. Uses `String.indexOf()` to find suffix candidates, reverse DFA backward to find match start, forward DFA + PikeVM to verify. Anti-quadratic `minStart` watermark prevents O(n²) behavior.
 
-2. **Three-phase search** — Forward DFA finds match end → reverse DFA finds match start → capture engine on narrowed window. This avoids running PikeVM/backtracker over the full haystack. The `captures` benchmark improved from 315x slower to **33.6x slower**.
+2. **ReverseInner** — Extracts an inner literal from pattern middle (longest-literal heuristic). Uses a **separate prefix-only reverse DFA** (compiled from just the prefix HIR, not the full pattern). Dual watermarks (`minStart`, `minPreStart`) with quadratic-abort fallback to PikeVM.
 
-3. **Bounded backtracker** — For small match windows, the backtracker (O(m×n) with low constant factor) is faster than PikeVM for captures. Combined with three-phase narrowing, this accelerates capture-heavy patterns.
+**Strategy selection order:** PrefilterOnly → Core w/ prefix → ReverseSuffix → ReverseInner → Core w/o prefilter.
 
-#### Pathological pattern improvements
+**Guards:** Inner literals require minimum length 3 (short literals like `-` cause too many false positives). Zero-width prefixes (e.g., `\b` alone) are excluded.
 
-The `redosShort` benchmark (`.*.*=.*` on 100 chars) improved from 2.7x slower to **27x faster than JDK**. The `quadratic` patterns also improved significantly (7.9x → 1.4x slower for 100 chars, 1.9x → 1.1x slower for 1000 chars). These improvements come from the DFA handling more of the search before falling back.
+**Note:** The current benchmark patterns (`[a-zA-Z]+`, `(\d{4})-(\d{2})-(\d{2})`, `\w+`) don't trigger suffix/inner prefilters because they lack extractable literals at non-prefix positions. Patterns like `\w+Holmes`, `\w+Sherlock\w+` would benefit. The previous benchmark results (2026-03-12) were measured on different hardware and are not directly comparable.
+
+### Previous improvements (2026-03-12)
+
+Three changes drove earlier search throughput gains: quit chars (DFA handles ASCII portions of Unicode word boundaries), three-phase search (forward DFA → reverse DFA → capture engine on narrowed window), and bounded backtracker (preferred for small capture windows).
 
 ### Where ohai wins
 
@@ -244,7 +287,7 @@ Remaining gaps and optimizations:
 2. ~~**Quit chars**~~ — **DONE** (2026-03-12). DFA handles ASCII portions of Unicode word boundary patterns.
 3. ~~**Three-phase search**~~ — **DONE** (2026-03-12). Forward DFA → reverse DFA → capture engine.
 4. ~~**Bounded backtracker**~~ — **DONE** (2026-03-12). Preferred capture engine for small windows.
-5. **Suffix/inner literal prefilters** — patterns like `\w+\s+Holmes` have an extractable literal suffix. This is the next highest-impact optimization for closing the `captures` gap.
+5. ~~**Suffix/inner literal prefilters**~~ — **DONE** (2026-03-13). `ReverseSuffix` and `ReverseInner` strategies extract suffix/inner literals for `indexOf`-based skipping, then reverse DFA → forward DFA → PikeVM to verify matches. Guards: minimum length 3 for inner literals, zero-width prefix check.
 6. **One-pass DFA** — for simple patterns that can be matched in a single left-to-right pass with captures.
 7. **Aho-Corasick** — for alternations with many branches (>10), more efficient than multi-`indexOf`.
 8. **SIMD acceleration** — Java's Vector API or `MemorySegment` for vectorized literal scanning.

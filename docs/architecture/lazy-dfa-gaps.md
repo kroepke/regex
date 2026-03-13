@@ -10,8 +10,7 @@ See `docs/superpowers/specs/2026-03-11-lazy-dfa-design.md` for the initial desig
 
 The reverse NFA compiler (`Compiler.compileReverse()`), reverse DFA search (`LazyDFA.searchRev()`), and `Strategy.Core` wiring are fully implemented. Three-phase search is active: forward DFA finds match end → reverse DFA finds match start → capture engine (bounded backtracker or PikeVM) runs on the narrowed window.
 
-**Remaining work:**
-- Suffix and inner literal prefilter strategies that use the reverse DFA as primary search driver
+**Suffix/inner prefilters:** DONE (2026-03-13). `ReverseSuffix` and `ReverseInner` strategies use the reverse DFA to find match start after `indexOf`-based literal prefiltering. See `docs/superpowers/specs/2026-03-12-suffix-inner-prefilter-design.md`.
 
 **Design spec:** `docs/superpowers/specs/2026-03-11-reverse-dfa-design.md`
 
