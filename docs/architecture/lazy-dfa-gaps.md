@@ -14,17 +14,17 @@ The reverse NFA compiler (`Compiler.compileReverse()`), reverse DFA search (`Laz
 
 **Design spec:** `docs/superpowers/specs/2026-03-11-reverse-dfa-design.md`
 
-## DFA Lazy Quantifier Limitation
+## DFA Match Semantics: LeftmostLongest vs LeftmostFirst — CRITICAL GAP
 
-**What:** The forward lazy DFA always finds leftmost-longest matches, even for lazy quantifiers (`*?`, `+?`, `??`) and patterns with empty alternatives (`|b`, `(?:)+|b`).
+**See `docs/architecture/dfa-match-semantics-gap.md` for full analysis.**
 
-**Why it matters:** The DFA's `computeNextState` iterates NFA states in sorted order (ascending state ID). Because the `Match` state has a high ID, char-consuming states are processed before `Match` during epsilon closure. This means the DFA continues matching past where a lazy quantifier would stop, or past where an empty alternative would match. For example, `(?U)a+` on `"aaa"` should match `"a"` (lazy) but the DFA matches `"aaa"` (greedy). This prevents the three-phase search (forward DFA → reverse DFA → done) from being activated, since the forward DFA's overestimated match end would cause the reverse DFA to compute an incorrect start position.
+**What:** Our DFA uses leftmost-longest semantics. The upstream Rust crate ONLY implements leftmost-first (`LeftmostLongest` is explicitly not supported upstream). This means our DFA results can disagree with PikeVM, requiring PikeVM verification for every search — eliminating the DFA-only fast path that upstream uses.
 
-**How upstream handles it:** The Rust crate's DFA also finds leftmost-first matches (which for DFAs means leftmost-longest within the forward pass). The upstream handles this by always using PikeVM for the final match refinement when lazy semantics matter. The three-phase search in upstream is used for the common case where greedy/lazy distinction doesn't affect the match span (e.g., `[a-z]+` where the DFA match end equals the PikeVM match end).
+**How upstream actually handles it:** The upstream DFA implements `LeftmostFirst` natively. All engines (DFA, PikeVM, backtracker) are semantically equivalent by construction. The upstream NEVER cross-validates between engines. Forward DFA → reverse DFA → return directly. No PikeVM verification.
 
-**When to fix:** This is a fundamental property of DFA-based matching. The fix is to detect patterns where lazy/greedy semantics can affect match span and only use three-phase search for patterns where they can't. This requires HIR-level analysis.
+**Impact:** ~1000x slowdown for high-match-count patterns (`\w+`, `[a-zA-Z]+`) because every match requires PikeVM verification instead of DFA-only return.
 
-**Complexity:** Medium. Requires pattern analysis to determine when three-phase is safe.
+**Fix:** Implement `MatchKind.LeftmostFirst` in our DFA's epsilon closure. Medium-high complexity.
 
 ## Overlapping Match Mode
 

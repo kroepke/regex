@@ -74,6 +74,24 @@ The project uses Maven with a wrapper script (`./mvnw`). Always use the wrapper 
 - Keep upstream doc comments as reference comments where they clarify non-obvious algorithm choices
 - When upstream uses Rust-specific optimizations (e.g., SIMD via `memchr`), find the Java equivalent (e.g., `java.lang.foreign` or `Vector API`) or note it as a future optimization
 
+### Upstream Behavioral Fidelity — MANDATORY
+
+**Every engine-level change MUST be verified against upstream Rust source.** Do not guess, infer, or assume how upstream works — read the actual code. Violations of this rule have caused repeated correctness bugs and performance regressions.
+
+**Concrete rules:**
+
+1. **Read before writing.** Before implementing or modifying any search path, strategy, or engine interaction: open the corresponding upstream Rust file and read the relevant function. Cite the file path and line range in your commit message or PR description. "I believe upstream does X" is not acceptable — "upstream does X at `regex-automata/src/meta/strategy.rs:706-730`" is.
+
+2. **Never assume engine equivalence.** Our DFA uses leftmost-longest semantics; upstream uses leftmost-first. These produce different results for lazy quantifiers, length-ambiguous alternation, and empty-match patterns. Until we implement `MatchKind.LeftmostFirst` (see `docs/architecture/dfa-match-semantics-gap.md`), DFA results MUST be verified by PikeVM. Never return DFA match positions directly without PikeVM verification.
+
+3. **Check `docs/architecture/` before optimizing.** Known semantic gaps are documented there. If your optimization depends on an assumption about engine behavior, check whether that assumption is listed as a known gap. If it is, the optimization is unsafe until the gap is closed.
+
+4. **Run the full test suite (2,154 tests) after every search-path change.** Not just the module you modified — the full reactor. Upstream TOML suite failures indicate behavioral divergence from Rust. Zero failures is the only acceptable result.
+
+5. **Run benchmarks after every search-path change.** Compare against the immediately preceding commit. Any benchmark that changes by more than 2x (in either direction) requires investigation and explanation before the change is committed. Use: `./mvnw -P bench package -DskipTests && java -jar regex-bench/target/benchmarks.jar -f 1 -wi 3 -i 5`
+
+6. **When a subagent modifies `Strategy.java`, `Regex.java`, or any DFA/PikeVM interaction**, the review checkpoint MUST verify: (a) which upstream function this corresponds to, (b) that the search semantics match upstream, (c) that all tests pass, (d) that benchmarks show no regression.
+
 ### Java Conventions
 - Target Java 21 as baseline (sealed classes, records, pattern matching, virtual threads are all available)
 - Use `sealed interface` + `record` for AST/HIR node types (mirrors Rust enums)
@@ -87,6 +105,7 @@ The project uses Maven with a wrapper script (`./mvnw`). Always use the wrapper 
 
 ## Architecture Gaps
 
-Features intentionally deferred from initial implementations. Check these before adding new engines or optimizations — the gap may already be documented with design notes.
+Features intentionally deferred from initial implementations. **Check these before adding new engines or optimizations** — the gap may already be documented with design notes. Ignoring these has caused correctness bugs and performance regressions.
 
-- **Lazy DFA gaps** — `docs/architecture/lazy-dfa-gaps.md`: reverse DFA, look-around encoding, overlapping mode, quit bytes, loop unrolling, per-pattern start states, anchored start state optimization
+- **DFA match semantics (CRITICAL)** — `docs/architecture/dfa-match-semantics-gap.md`: Our DFA uses leftmost-longest; upstream uses leftmost-first. This is the #1 performance/correctness gap. All DFA results require PikeVM verification until this is fixed.
+- **Lazy DFA gaps** — `docs/architecture/lazy-dfa-gaps.md`: overlapping mode, loop unrolling, per-pattern start states
