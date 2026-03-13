@@ -486,13 +486,14 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                         return pikeVM.search(input.withBounds(start, end, false), cache.pikeVMCache());
                     }
                     case SearchResult.Match m -> {
-                        int matchStart = m.offset();
-                        Input fwdInput = input.withBounds(matchStart, end, false);
+                        // Use minStart (not matchStart) so PikeVM finds the true
+                        // leftmost match — the prefix reverse DFA may overshoot rightward.
+                        Input fwdInput = input.withBounds(minStart, end, false);
                         SearchResult fwdResult = forwardDFA.searchFwd(fwdInput, cache.forwardDFACache());
 
                         switch (fwdResult) {
                             case SearchResult.Match fm -> {
-                                Input narrowed = input.withBounds(matchStart, fm.offset(), false);
+                                Input narrowed = input.withBounds(minStart, fm.offset(), false);
                                 return pikeVM.search(narrowed, cache.pikeVMCache());
                             }
                             case SearchResult.GaveUp g2 -> {
@@ -543,13 +544,13 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                         return pikeVM.searchCaptures(input.withBounds(start, end, false), cache.pikeVMCache());
                     }
                     case SearchResult.Match m -> {
-                        int matchStart = m.offset();
-                        Input fwdInput = input.withBounds(matchStart, end, false);
+                        // Use minStart (not matchStart) for same reason as search()
+                        Input fwdInput = input.withBounds(minStart, end, false);
                         SearchResult fwdResult = forwardDFA.searchFwd(fwdInput, cache.forwardDFACache());
 
                         switch (fwdResult) {
                             case SearchResult.Match fm -> {
-                                Input narrowed = input.withBounds(matchStart, fm.offset(), false);
+                                Input narrowed = input.withBounds(minStart, fm.offset(), false);
                                 return Strategy.doCaptureEngine(narrowed, cache, pikeVM, backtracker);
                             }
                             case SearchResult.GaveUp g2 -> {

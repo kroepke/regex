@@ -116,6 +116,32 @@ public final class Regex {
                     }
                 }
 
+                // Try ReverseInner: no prefix/suffix prefilter, but inner literal available.
+                // Uses its own prefix-only reverse DFA, not the full-pattern reverseDFA.
+                // Guard: prefix HIR must match characters (not just zero-width assertions
+                // like \b), otherwise the reverse search range can be empty.
+                if (prefilter == null && forwardDFA != null) {
+                    LiteralExtractor.InnerLiteral innerLiteral = LiteralExtractor.extractInner(hir);
+                    if (innerLiteral != null && hirMatchesCharacters(innerLiteral.prefixHir())) {
+                        Prefilter innerPrefilter = buildPrefilter(innerLiteral.literal());
+                        if (innerPrefilter != null) {
+                            try {
+                                NFA prefixRevNfa = Compiler.compileReverse(innerLiteral.prefixHir());
+                                CharClasses prefixRevCc = CharClassBuilder.build(prefixRevNfa, quitNonAscii);
+                                LazyDFA prefixReverseDFA = LazyDFA.create(prefixRevNfa, prefixRevCc);
+                                if (prefixReverseDFA != null) {
+                                    strategy = new Strategy.ReverseInner(
+                                            pikeVM, forwardDFA, prefixReverseDFA, innerPrefilter, backtracker);
+                                    namedGroups = buildNamedGroupMap(nfa);
+                                    return new Regex(pattern, strategy, namedGroups);
+                                }
+                            } catch (BuildError ignored) {
+                                // Prefix HIR compilation failed — fall through to Core
+                            }
+                        }
+                    }
+                }
+
                 strategy = new Strategy.Core(pikeVM, forwardDFA, reverseDFA, prefilter, backtracker);
                 namedGroups = buildNamedGroupMap(nfa);
             }
@@ -207,6 +233,25 @@ public final class Regex {
             case LiteralSeq.Single single -> new SingleLiteral(single.literal());
             case LiteralSeq.Alternation alt -> new MultiLiteral(
                     alt.literals().toArray(char[][]::new));
+        };
+    }
+
+    /**
+     * Returns true if the HIR can match at least one character (not just
+     * zero-width assertions like \b). Used to guard ReverseInner selection —
+     * a prefix HIR that is purely zero-width would produce an empty reverse
+     * search range.
+     */
+    private static boolean hirMatchesCharacters(Hir hir) {
+        return switch (hir) {
+            case Hir.Literal l -> true;
+            case Hir.Class c -> true;
+            case Hir.Repetition r -> hirMatchesCharacters(r.sub());
+            case Hir.Capture cap -> hirMatchesCharacters(cap.sub());
+            case Hir.Concat concat -> concat.subs().stream().anyMatch(Regex::hirMatchesCharacters);
+            case Hir.Alternation alt -> alt.subs().stream().anyMatch(Regex::hirMatchesCharacters);
+            case Hir.Look l -> false;
+            case Hir.Empty e -> false;
         };
     }
 
