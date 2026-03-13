@@ -124,7 +124,11 @@ public final class Regex {
                     LiteralExtractor.InnerLiteral innerLiteral = LiteralExtractor.extractInner(hir);
                     if (innerLiteral != null && hirMatchesCharacters(innerLiteral.prefixHir())) {
                         Prefilter innerPrefilter = buildPrefilter(innerLiteral.literal());
-                        if (innerPrefilter != null) {
+                        // Short inner literals (1-2 chars) are too common in most inputs,
+                        // causing more reverse DFA overhead than they save via indexOf.
+                        // The upstream uses optimize_for_prefix_by_preference() (byte frequency)
+                        // which is a more nuanced heuristic — this threshold is a simpler guard.
+                        if (innerPrefilter != null && innerPrefilter.matchLength() >= 3) {
                             try {
                                 NFA prefixRevNfa = Compiler.compileReverse(innerLiteral.prefixHir());
                                 CharClasses prefixRevCc = CharClassBuilder.build(prefixRevNfa, quitNonAscii);
