@@ -275,7 +275,6 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
 
                 switch (revResult) {
                     case SearchResult.NoMatch n -> {
-                        minStart = reverseFrom;
                         start = suffixPos + 1;
                         continue;
                     }
@@ -310,7 +309,6 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
 
                 switch (revResult) {
                     case SearchResult.NoMatch n -> {
-                        minStart = reverseFrom;
                         start = suffixPos + 1;
                         continue;
                     }
@@ -324,11 +322,14 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
 
                         switch (fwdResult) {
                             case SearchResult.Match fm -> {
-                                Input narrowed = input.withBounds(matchStart, fm.offset(), false);
+                                // Use minStart (not matchStart) so PikeVM finds the true
+                                // leftmost match — the reverse DFA may overshoot rightward.
+                                Input narrowed = input.withBounds(minStart, fm.offset(), false);
                                 return pikeVM.search(narrowed, cache.pikeVMCache());
                             }
                             case SearchResult.GaveUp g2 -> {
-                                return pikeVM.search(fwdInput, cache.pikeVMCache());
+                                return pikeVM.search(
+                                        input.withBounds(minStart, end, false), cache.pikeVMCache());
                             }
                             case SearchResult.NoMatch n2 -> {
                                 start = suffixPos + 1;
@@ -361,7 +362,6 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
 
                 switch (revResult) {
                     case SearchResult.NoMatch n -> {
-                        minStart = reverseFrom;
                         start = suffixPos + 1;
                         continue;
                     }
@@ -375,11 +375,14 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
 
                         switch (fwdResult) {
                             case SearchResult.Match fm -> {
-                                Input narrowed = input.withBounds(matchStart, fm.offset(), false);
+                                // Use minStart (not matchStart) so PikeVM finds the true
+                                // leftmost match — the reverse DFA may overshoot rightward.
+                                Input narrowed = input.withBounds(minStart, fm.offset(), false);
                                 return Strategy.doCaptureEngine(narrowed, cache, pikeVM, backtracker);
                             }
                             case SearchResult.GaveUp g2 -> {
-                                return pikeVM.searchCaptures(fwdInput, cache.pikeVMCache());
+                                return pikeVM.searchCaptures(
+                                        input.withBounds(minStart, end, false), cache.pikeVMCache());
                             }
                             case SearchResult.NoMatch n2 -> {
                                 start = suffixPos + 1;

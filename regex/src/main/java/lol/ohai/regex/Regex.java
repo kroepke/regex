@@ -103,6 +103,19 @@ public final class Regex {
                 }
 
                 BoundedBacktracker backtracker = new BoundedBacktracker(nfa);
+
+                // Try ReverseSuffix: no prefix prefilter, but suffix available + both DFAs
+                if (prefilter == null && forwardDFA != null && reverseDFA != null) {
+                    LiteralSeq suffixes = LiteralExtractor.extractSuffixes(hir);
+                    Prefilter suffixPrefilter = buildPrefilter(suffixes);
+                    if (suffixPrefilter != null) {
+                        strategy = new Strategy.ReverseSuffix(
+                                pikeVM, forwardDFA, reverseDFA, suffixPrefilter, backtracker);
+                        namedGroups = buildNamedGroupMap(nfa);
+                        return new Regex(pattern, strategy, namedGroups);
+                    }
+                }
+
                 strategy = new Strategy.Core(pikeVM, forwardDFA, reverseDFA, prefilter, backtracker);
                 namedGroups = buildNamedGroupMap(nfa);
             }
