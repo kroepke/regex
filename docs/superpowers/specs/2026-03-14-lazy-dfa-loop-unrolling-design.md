@@ -119,7 +119,7 @@ Note: The reverse guard uses `pos >= start + 3` rather than `pos - 3 >= start` f
 The `pos + 3 < end` guard (forward) and `pos - 3 >= start` guard (reverse) give HotSpot C2 a clear range proof:
 
 - **Forward:** `pos + 3 < end` implies `haystack[pos]` through `haystack[pos + 3]` are in bounds (assuming `end <= haystack.length`, which is guaranteed by `Input`).
-- **Reverse:** `pos - 3 >= start` implies `haystack[pos]` through `haystack[pos - 3]` are in bounds (assuming `start >= 0`).
+- **Reverse:** `pos >= start + 3` implies `haystack[pos]` through `haystack[pos - 3]` are in bounds (assuming `start >= 0`, which is guaranteed by `Input`).
 - **Transition table:** `cache.nextState(sid, classId)` accesses `transTable[sid + classId]`. The JIT may or may not eliminate this bounds check — it depends on whether C2 can prove the index is in range. This is acceptable; the `transTable` access is a single array lookup that is likely L1-hot.
 
 ### Fast-Path Guard
