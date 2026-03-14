@@ -145,14 +145,24 @@ public final class LazyDFA {
             return new SearchResult.GaveUp(pos);
         }
 
-        // EOI transition: compute next state with EOI class to resolve
-        // look-ahead assertions (END_TEXT, END_LINE) at end-of-input.
+        // Right-edge transition for forward search. When the search span
+        // ends at the haystack boundary, use the EOI class. Otherwise,
+        // transition on the actual character after the span to get correct
+        // look-ahead context (e.g., $ and word boundary assertions).
+        // Ref: upstream/regex/regex-automata/src/hybrid/search.rs:693-726
         int rawSid = sid & 0x7FFF_FFFF;
         if (rawSid != dead && rawSid != quit) {
-            int eoiClassId = charClasses.eoiClass();
-            int eoiSid = computeNextState(cache, rawSid, eoiClassId);
-            if (eoiSid < 0) {
-                // Match-flagged result from EOI
+            int rightEdgeSid;
+            if (end < haystack.length) {
+                int classId = charClasses.classify(haystack[end]);
+                if (charClasses.hasQuitClasses() && charClasses.isQuitClass(classId)) {
+                    return new SearchResult.GaveUp(end);
+                }
+                rightEdgeSid = computeNextState(cache, rawSid, classId);
+            } else {
+                rightEdgeSid = computeNextState(cache, rawSid, charClasses.eoiClass());
+            }
+            if (rightEdgeSid < 0) {
                 lastMatchEnd = end;
             }
         }
@@ -228,13 +238,25 @@ public final class LazyDFA {
             return new SearchResult.GaveUp(pos);
         }
 
-        // EOI: compute next state with EOI class to resolve look-ahead
-        // assertions at left boundary.
+        // Left-edge transition for reverse search. When the search span
+        // starts at position 0 (start of text), use the EOI class. Otherwise,
+        // transition on the actual character before the span to get correct
+        // look-behind context (e.g., word boundary assertions).
+        // Ref: upstream/regex/regex-automata/src/hybrid/search.rs:737-754
         int rawSid = sid & 0x7FFF_FFFF;
         if (rawSid != dead && rawSid != quit) {
-            int eoiClassId = charClasses.eoiClass();
-            int eoiSid = computeNextState(cache, rawSid, eoiClassId);
-            if (eoiSid < 0) {
+            int leftEdgeSid;
+            if (start > 0) {
+                int classId = charClasses.classify(haystack[start - 1]);
+                if (charClasses.hasQuitClasses() && charClasses.isQuitClass(classId)) {
+                    // Char before span is a quit char — give up
+                    return new SearchResult.GaveUp(start);
+                }
+                leftEdgeSid = computeNextState(cache, rawSid, classId);
+            } else {
+                leftEdgeSid = computeNextState(cache, rawSid, charClasses.eoiClass());
+            }
+            if (leftEdgeSid < 0) {
                 lastMatchStart = start;
             }
         }
