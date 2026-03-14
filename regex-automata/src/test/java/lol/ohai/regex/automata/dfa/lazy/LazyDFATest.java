@@ -317,6 +317,94 @@ class LazyDFATest {
         assertEquals(0, ((SearchResult.Match) result).offset());
     }
 
+    // -- Loop unrolling edge cases (forward) --
+
+    @Test
+    void fwdEmptyHaystack() {
+        // 0 chars: inner loop never enters, outer tail handles it
+        var result = search("a", "");
+        assertInstanceOf(SearchResult.NoMatch.class, result);
+    }
+
+    @Test
+    void fwdOneCharMatch() {
+        // 1 char: inner loop guard (pos + 3 < end) fails, tail processes
+        var result = search("a", "a");
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(1, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void fwdTwoCharMatch() {
+        var result = search("ab", "ab");
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(2, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void fwdThreeCharMatch() {
+        var result = search("abc", "abc");
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(3, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void fwdExactlyFourCharMatch() {
+        // 4 chars: inner loop runs one full iteration
+        var result = search("abcd", "abcd");
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(4, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void fwdFiveCharMatch() {
+        // 5 chars: one full unrolled iteration + 1 char in tail
+        var result = search("abcde", "abcde");
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(5, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void fwdLongLiteralMatch() {
+        // Many full unrolled iterations
+        var result = search("abcdefgh", "xxabcdefghxx");
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(10, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void fwdMatchAtUnrollBoundary() {
+        // Pattern that matches at position 4 (one full unrolled iteration)
+        var result = search("e", "abcde");
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(5, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void fwdDeadStateInLongInput() {
+        // No match in a long input — dead state reached after exhausting alternatives
+        var result = search("ZQZQ", "abcdefghijklmnopqrstuvwxyz");
+        assertInstanceOf(SearchResult.NoMatch.class, result);
+    }
+
+    @Test
+    void fwdMatchMidStreamAfterFullUnroll() {
+        // 8-char haystack, match ends at pos 5: one full unrolled iteration (pos 0-3),
+        // then break-out at step 1 of the second iteration when match state is hit.
+        var result = search("[a-z]{5}", "abcdeXXX");
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(5, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void fwdMatchMidStreamAtStep2() {
+        // 10-char haystack, match ends at pos 6: one full iteration (0-3),
+        // then step 0 ok (pos 4), step 1 ok (pos 5), step 2 triggers match.
+        var result = search("[a-z]{6}", "abcdefXXXX");
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(6, ((SearchResult.Match) result).offset());
+    }
+
     // -- Helpers --
 
     private SearchResult search(String pattern, String haystack) {
