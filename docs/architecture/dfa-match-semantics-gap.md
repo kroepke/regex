@@ -2,76 +2,45 @@
 
 **Status: RESOLVED (match semantics) / OPEN (char class overflow)**
 
-## Match Semantics — Resolved
+## Match Semantics — Resolved (2026-03-14)
 
-Our lazy DFA **already implements leftmost-first** match semantics, matching upstream. The `break`-on-Match in `computeNextState` (`LazyDFA.java:439`) combined with the NFA state ordering from the Thompson compiler (first alternative explored first via `BinaryUnion.alt1`) produce correct leftmost-first results. This was verified by restoring three-phase DFA-only search (forward → reverse → return directly) with 99.4% test pass rate (874/879).
+Our lazy DFA **implements leftmost-first** match semantics, matching upstream exactly:
 
-The previous diagnosis (commit `6789c01`) that our DFA was "leftmost-longest" was incorrect. The 27 test failures it fixed were caused by surrogate pair handling and specific edge cases, not by fundamental match semantics.
+- **`computeNextState` break-on-Match** (`LazyDFA.java:439`): when iterating source NFA states and a Match state is encountered, break immediately — no further char-consuming states from lower-priority alternatives are processed. This matches upstream's `determinize/mod.rs:284`.
+- **NFA state ordering**: the Thompson compiler places first-alternative states before second-alternative states (via `BinaryUnion.alt1` explored first in DFS). Lazy quantifiers use reversed union ordering (exit before continue). This matches upstream's `compiler.rs:1106-1130`.
+- **1-char match delay**: match states are delayed by one character, matching upstream's `search.rs:265-270`. Start states are never match states (`computeStartState` strips MATCH_FLAG).
 
-### What upstream does
+Three-phase DFA-only search is active:
+- `Core.dfaSearch()`: forward DFA → reverse DFA → return `[matchStart, matchEnd]` directly. Matches upstream `dfa/regex.rs:474-534`.
+- `Core.dfaSearchCaptures()`: forward DFA → reverse DFA → capture engine on narrowed `[matchStart, matchEnd]`. Matches upstream `meta/strategy.rs:829-857`.
+- Fallback to PikeVM only when DFA gives up (quit chars, cache exhaustion).
 
-The upstream defines match semantics in `regex-automata/src/util/search.rs`:
+All 879/879 upstream TOML tests pass with DFA-only three-phase search.
 
-```rust
-pub enum MatchKind {
-    All,           // overlapping multi-pattern only
-    LeftmostFirst, // default — the ONLY universally supported mode
-    // NOTE: LeftmostLongest is documented as a future possibility but NOT implemented
-}
-```
+### Bugs fixed to enable three-phase (2026-03-14)
 
-Because all engines (DFA, PikeVM, bounded backtracker, one-pass DFA) implement leftmost-first, they are **semantically equivalent by construction**. The upstream's search strategies **never cross-validate** results between engines:
+| Bug | Root cause | Fix | Upstream ref |
+|---|---|---|---|
+| Edge transitions | DFA used EOI sentinel at span boundaries instead of actual char | Use `haystack[end]`/`haystack[start-1]` at span edges | `search.rs:693-758` (eoi_fwd/eoi_rev) |
+| Cached dead path | `sid` not set to dead on cached dead transition | Set `sid=dead` before break | `search.rs:277-279` |
+| Reverse start state | Reverse DFA used `Start.from(haystack, start)` instead of `Start.fromReverse(haystack, end)` | Added `Start.fromReverse` for reverse look-behind context | `start.rs:155-158` (from_input_reverse) |
+| Char class overflow | Unicode `\w` produces >256 equiv classes, overflowing byte class IDs | Auto-quit-on-non-ASCII when classes exceed 256 | `alphabet.rs` (byte-based limit) |
 
-- Forward DFA finds matchEnd → reverse DFA finds matchStart → return `[matchStart, matchEnd]` directly
-- No PikeVM verification. Ever.
-- Fallback to PikeVM only happens when the DFA **cannot handle the pattern** (e.g., Unicode word boundaries), not to verify correctness.
+### Previous misdiagnosis
 
-### What we do
+Commit `6789c01` removed three-phase search based on the diagnosis that "the DFA uses leftmost-longest semantics." This was incorrect — the DFA was always leftmost-first. The 27 test failures that commit fixed were actually caused by:
+1. Surrogate pair handling in start state computation (fixed in the same commit's LazyDFA.java change)
+2. Edge transition context bugs (not using actual char at span boundaries)
+3. Reverse DFA start state using wrong look-behind position
 
-Our `LazyDFA.computeNextState()` iterates NFA states in ascending state ID order. Because the `Match` state has a high ID, char-consuming states are processed before `Match` during epsilon closure. This means the DFA always extends the match as far as possible — leftmost-longest semantics.
+## Char Class Overflow — Open
 
-This disagrees with PikeVM (which implements leftmost-first) for:
+**What:** Byte-based class IDs (`byte` in Java, 0-255) limit the DFA to 256 equivalence classes. Unicode character classes like `\w` produce ~1,400 boundary points, exceeding this limit.
 
-1. **Lazy quantifiers**: `a+?` on `aaa` — DFA returns `[0,3]`, PikeVM returns `[0,1]`
-2. **Length-ambiguous alternation**: `(a|ab)` on `ab` — DFA returns `[0,2]`, PikeVM returns `[0,1]`
-3. **Optional/star groups**: `(aa$)?` on `aa` — DFA skips empty match, PikeVM finds it
-4. **Empty match vs non-empty**: `(?:\n?[a-z]{3}$)*` — DFA finds longest non-empty match, PikeVM finds empty match at position 0
+**Current mitigation:** `CharClassBuilder.build()` detects overflow and automatically retries with `quitNonAscii=true`, collapsing all non-ASCII characters into quit classes. The DFA handles ASCII portions and gives up on non-ASCII, falling back to PikeVM.
 
-### Consequences
+**Impact:** For the `unicodeWord` benchmark (`\w+` on mixed ASCII/Unicode text), the DFA quits on every non-ASCII character, resulting in ~18 ops/s instead of the potential ~15,000+ ops/s with a correct DFA.
 
-Because our forward DFA can return a different matchEnd than PikeVM would, we must run PikeVM to verify every DFA result. This means:
+**Why upstream doesn't have this:** Upstream operates on UTF-8 bytes (0-255 alphabet). The `ByteClasses` type naturally limits to 257 classes (256 bytes + EOI). Our char-unit DFA has a 65,536-value alphabet.
 
-- **No DFA-only search**: `search()` (no captures) must still call PikeVM on `[input.start(), matchEnd]`
-- **No three-phase narrowing for search()**: The reverse DFA's matchStart is computed relative to the forward DFA's (potentially wrong) matchEnd, so PikeVM on `[matchStart, matchEnd]` can miss the correct leftmost-first match
-- **Three-phase narrowing for searchCaptures() is safe**: The reverse DFA narrows the window for the capture engine, and PikeVM/backtracker on the narrowed window will find the correct leftmost-first match **if the correct match is within the window** (which is guaranteed when the pattern cannot match empty at a position before matchStart)
-
-### Performance impact
-
-For patterns like `\w+` on 900KB text (tens of thousands of matches), the DFA-only path would return in ~63µs (15,717 ops/s). With PikeVM verification, it takes ~81ms (12 ops/s) — a **1,277x slowdown**. Similar impact on `[a-zA-Z]+`, `.*.*=.*`, and any high-match-count pattern.
-
-## The Fix
-
-Implement `MatchKind.LeftmostFirst` in our DFA. The key change is in `computeNextState()` epsilon closure: when an NFA `Match` state is reachable, it should take priority over char-consuming states for alternatives listed earlier in the pattern. This mirrors upstream's `regex-automata/src/nfa/thompson/compiler.rs` where NFA state IDs encode alternation priority.
-
-### Implementation approach
-
-Reference: `upstream/regex/regex-automata/src/util/search.rs:1698-1721` for `MatchKind` enum, and `upstream/regex/regex-automata/src/dfa/` for how the DFA handles it.
-
-1. Add `MatchKind` enum (`LeftmostFirst`, `All`)
-2. Modify `computeNextState()` epsilon closure to respect alternation priority when `MatchKind.LeftmostFirst`
-3. Remove PikeVM verification from `Core.dfaSearch()` — return DFA results directly
-4. Restore three-phase search: forward DFA → reverse DFA → return `[matchStart, matchEnd]`
-5. Remove three-phase from `Core.dfaSearchCaptures()` only when captures are needed
-
-### Complexity
-
-Medium-high. Requires understanding the NFA state ID ordering, epsilon closure priority, and match reporting. Get this right by reading the upstream implementation, NOT by guessing.
-
-## Interim Mitigation
-
-Until leftmost-first DFA is implemented:
-
-1. **Core.dfaSearch()** must always verify with PikeVM on `[input.start(), matchEnd]`
-2. **Core.dfaSearchCaptures()** can use three-phase (reverse DFA narrows window) for patterns that cannot match empty, but must fall back to two-phase for patterns that can
-3. **ReverseSuffix and ReverseInner** already use PikeVM verification and are correct
-4. **Never return DFA match positions directly** without PikeVM verification
+**Fix:** Widen class IDs from `byte` to `short` (16-bit), allowing up to 65,536 classes. Requires changing `CharClasses` lookup tables and `DFACache` transition table layout. Medium complexity.
