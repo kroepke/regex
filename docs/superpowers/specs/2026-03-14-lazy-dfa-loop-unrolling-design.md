@@ -43,16 +43,24 @@ outer loop: while (pos < end)
   │    ├─ Step 3: classify → lookup → check (s3 <= quit?)
   │    └─ All fast: sid = s3, pos += 4, charsSearched += 4
   │
-  ├─ [on break-out: sid = last good state, pos = triggering char]
+  ├─ [on break-out: sid = last good state, pos = triggering char,
+  │    charsSearched += K (where K = number of successful steps)]
   │
   ├─ slow-path dispatch (existing logic, unchanged):
-  │    ├─ nextSid < 0       → record match, strip flag
-  │    ├─ nextSid == UNKNOWN → computeNextState, cache result
-  │    ├─ nextSid == dead    → break
+  │    │  Re-classify haystack[pos], call cache.nextState(sid, classId)
+  │    │  to get the same special nextSid that caused the break-out.
+  │    ├─ nextSid < 0       → record match, strip flag, pos++
+  │    ├─ nextSid == UNKNOWN → computeNextState, cache result, pos++
+  │    ├─ nextSid == dead    → break outer loop
   │    └─ nextSid == quit    → return GaveUp
+  │    (then continue outer loop → re-enter inner loop if pos + 3 < end)
   │
-  └─ tail loop: remaining 0-3 chars processed one at a time
+  └─ tail: when pos + 3 >= end, the inner loop's guard fails and
+     the outer loop processes remaining 0-3 chars one at a time
+     via the same slow-path dispatch (which handles all state types)
 ```
+
+**Note on "tail loop":** There is no separate tail loop. When fewer than 4 chars remain, the inner loop simply doesn't execute. The outer `while (pos < end)` loop continues with its single-step classify → lookup → dispatch logic, which handles both fast-path and slow-path states. This is the same code path that handles break-outs from the inner loop.
 
 ### Forward Search — Inner Loop
 
@@ -62,13 +70,13 @@ while (pos + 3 < end) {
     if (s0 <= quit) { break; }
 
     int s1 = cache.nextState(s0, charClasses.classify(haystack[pos + 1]));
-    if (s1 <= quit) { sid = s0; pos++; break; }
+    if (s1 <= quit) { sid = s0; pos++; cache.charsSearched++; break; }
 
     int s2 = cache.nextState(s1, charClasses.classify(haystack[pos + 2]));
-    if (s2 <= quit) { sid = s1; pos += 2; break; }
+    if (s2 <= quit) { sid = s1; pos += 2; cache.charsSearched += 2; break; }
 
     int s3 = cache.nextState(s2, charClasses.classify(haystack[pos + 3]));
-    if (s3 <= quit) { sid = s2; pos += 3; break; }
+    if (s3 <= quit) { sid = s2; pos += 3; cache.charsSearched += 3; break; }
 
     sid = s3;
     pos += 4;
@@ -76,29 +84,35 @@ while (pos + 3 < end) {
 }
 ```
 
-**On break-out:** `sid` is set to the last successful (non-special) state, `pos` points to the char that produced the special state. The outer loop re-classifies `haystack[pos]` and runs the existing slow-path dispatch. Re-classifying one char is cheap (two array lookups) and keeps the break-out path simple.
+**On break-out:** `sid` is set to the last successful (non-special) state, `pos` points to the char that produced the special state. The `charsSearched` counter accounts for the K successfully processed chars before the break (0 at step 0, 1 at step 1, etc.). The outer loop re-classifies `haystack[pos]` and runs the existing slow-path dispatch, which adds 1 more for the char it processes. Re-classifying one char is cheap (two array lookups) and keeps the break-out path simple.
+
+**Match state correctness on break-out:** When a match state (negative `nextSid`) triggers a break, `sid` is set to the last non-special state and `pos` is the triggering position. The outer loop re-classifies `haystack[pos]`, gets the same match state from `cache.nextState()`, and records `lastMatchEnd = pos` / `lastMatchStart = pos + 1` (reverse) via its existing match-handling logic. No match is lost.
+
+**UNKNOWN states during cache warm-up:** UNKNOWN (`0 <= quit`) always triggers a break-out. This means the inner unrolled loop only stays hot when all 4 transitions are already cached. During the initial warm-up phase, the outer loop's UNKNOWN handler (`computeNextState`) populates the cache. Once the DFA reaches steady state (finite number of states, all transitions cached), the inner loop dominates.
 
 ### Reverse Search — Inner Loop
 
 ```java
-while (pos - 3 >= start) {
+while (pos >= start + 3) {
     int s0 = cache.nextState(sid, charClasses.classify(haystack[pos]));
     if (s0 <= quit) { break; }
 
     int s1 = cache.nextState(s0, charClasses.classify(haystack[pos - 1]));
-    if (s1 <= quit) { sid = s0; pos--; break; }
+    if (s1 <= quit) { sid = s0; pos--; cache.charsSearched++; break; }
 
     int s2 = cache.nextState(s1, charClasses.classify(haystack[pos - 2]));
-    if (s2 <= quit) { sid = s1; pos -= 2; break; }
+    if (s2 <= quit) { sid = s1; pos -= 2; cache.charsSearched += 2; break; }
 
     int s3 = cache.nextState(s2, charClasses.classify(haystack[pos - 3]));
-    if (s3 <= quit) { sid = s2; pos -= 3; break; }
+    if (s3 <= quit) { sid = s2; pos -= 3; cache.charsSearched += 3; break; }
 
     sid = s3;
     pos -= 4;
     cache.charsSearched += 4;
 }
 ```
+
+Note: The reverse guard uses `pos >= start + 3` rather than `pos - 3 >= start` for clarity — both are equivalent for valid non-negative indices, but the addition form avoids reader confusion about signed arithmetic near zero.
 
 ### JIT Bounds-Check Elimination
 
@@ -187,7 +201,7 @@ Three patterns that stress different DFA behaviors:
 |------|-----------|------------|
 | JIT pessimization from larger loop body | Low | Benchmark before/after; revert if regression |
 | Correctness bug in break-out logic | Low | Full 2,154-test suite; no semantic changes |
-| `charsSearched` inaccuracy | None | Fast path adds 4, slow path adds 1 — sum is correct |
+| `charsSearched` inaccuracy | None | Each break-out path adds the count of successfully processed chars (0-3); outer slow path adds 1 for the re-processed char |
 | Bounds check not eliminated by JIT | Medium | Acceptable fallback — bounds checks are cheap vs. the transition lookup |
 
 ## Non-Goals
