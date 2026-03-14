@@ -33,14 +33,12 @@ Commit `6789c01` removed three-phase search based on the diagnosis that "the DFA
 2. Edge transition context bugs (not using actual char at span boundaries)
 3. Reverse DFA start state using wrong look-behind position
 
-## Char Class Overflow — Open
+## Char Class Overflow — Resolved (2026-03-14)
 
-**What:** Byte-based class IDs (`byte` in Java, 0-255) limit the DFA to 256 equivalence classes. Unicode character classes like `\w` produce ~1,400 boundary points, exceeding this limit.
+**What:** Byte-based class IDs limited to 256 equivalence classes. Unicode `\w` produced ~1,400 boundary regions.
 
-**Current mitigation:** `CharClassBuilder.build()` detects overflow and automatically retries with `quitNonAscii=true`, collapsing all non-ASCII characters into quit classes. The DFA handles ASCII portions and gives up on non-ASCII, falling back to PikeVM.
+**Fix:** `CharClassBuilder.build()` now merges boundary regions with identical NFA transition behavior (BitSet signature using `cr.next()` targets). For `\w+`, ~1,400 regions collapse to ~55 classes. The DFA handles full Unicode without quit-on-non-ASCII fallback.
 
-**Impact:** For the `unicodeWord` benchmark (`\w+` on mixed ASCII/Unicode text), the DFA quits on every non-ASCII character, resulting in ~18 ops/s instead of the potential ~15,000+ ops/s with a correct DFA.
+**Remaining limitation:** Patterns with word boundary assertions (`\b`) skip the merge and use the old `buildUnmerged` path, because the merge collapses word-char/non-word-char distinctions needed for look-behind context. These patterns still use quit-on-non-ASCII for Unicode `\b`.
 
-**Why upstream doesn't have this:** Upstream operates on UTF-8 bytes (0-255 alphabet). The `ByteClasses` type naturally limits to 257 classes (256 bytes + EOI). Our char-unit DFA has a 65,536-value alphabet.
-
-**Fix:** Widen class IDs from `byte` to `short` (16-bit), allowing up to 65,536 classes. Requires changing `CharClasses` lookup tables and `DFACache` transition table layout. Medium complexity.
+**Performance:** The merge eliminates the class overflow, but `unicodeWord` performance (~18 ops/s) didn't improve because the DFA with 55 classes has a larger stride (64 vs 16) and the lazy DFA cache thrashes on the diverse Unicode state space. The next optimization is DFA cache tuning.

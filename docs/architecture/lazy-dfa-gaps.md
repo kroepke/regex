@@ -20,7 +20,9 @@ The reverse NFA compiler (`Compiler.compileReverse()`), reverse DFA search (`Laz
 
 Our DFA already implements leftmost-first semantics correctly via the `break`-on-Match in `computeNextState` and NFA state ordering. Three-phase DFA-only search (forward → reverse → return) is now active, matching upstream's `dfa/regex.rs:474-534`.
 
-**Char class overflow:** Patterns with Unicode character classes (`\w`, `\d`) can produce >256 equivalence classes, exceeding the byte-based class ID limit. `CharClassBuilder` automatically falls back to quit-on-non-ASCII when this happens, allowing the DFA to handle ASCII portions while PikeVM handles non-ASCII. A future optimization would widen class IDs from `byte` to `short`.
+**Char class overflow:** Resolved via equivalence class merging. `CharClassBuilder.build()` merges boundary regions with identical NFA transition targets, reducing `\w+` from ~1,400 regions to ~55 classes. Patterns with `\b` skip the merge and use quit-on-non-ASCII.
+
+**Performance gap:** `unicodeWord` (`\w+` on mixed text) is still ~18 ops/s despite the DFA handling full Unicode. The bottleneck is now DFA cache thrashing — 55 classes × diverse Unicode codepoints produces a large state space that overwhelms the lazy DFA cache. Next optimization: DFA cache tuning (capacity, eviction strategy).
 
 See `docs/architecture/dfa-match-semantics-gap.md` for full analysis.
 
