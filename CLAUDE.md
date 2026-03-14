@@ -82,7 +82,7 @@ The project uses Maven with a wrapper script (`./mvnw`). Always use the wrapper 
 
 1. **Read before writing.** Before implementing or modifying any search path, strategy, or engine interaction: open the corresponding upstream Rust file and read the relevant function. Cite the file path and line range in your commit message or PR description. "I believe upstream does X" is not acceptable — "upstream does X at `regex-automata/src/meta/strategy.rs:706-730`" is.
 
-2. **Never assume engine equivalence.** Our DFA uses leftmost-longest semantics; upstream uses leftmost-first. These produce different results for lazy quantifiers, length-ambiguous alternation, and empty-match patterns. Until we implement `MatchKind.LeftmostFirst` (see `docs/architecture/dfa-match-semantics-gap.md`), DFA results MUST be verified by PikeVM. Never return DFA match positions directly without PikeVM verification.
+2. **Never assume engine equivalence without verification.** Our DFA implements leftmost-first semantics (matching upstream), and three-phase DFA-only search is active. However, edge cases exist (empty matches, zero-width assertions, char class overflow for Unicode patterns). When modifying DFA or search paths, always verify against the full upstream test suite. See `docs/architecture/dfa-match-semantics-gap.md`.
 
 3. **Check `docs/architecture/` before optimizing.** Known semantic gaps are documented there. If your optimization depends on an assumption about engine behavior, check whether that assumption is listed as a known gap. If it is, the optimization is unsafe until the gap is closed.
 
@@ -107,5 +107,5 @@ The project uses Maven with a wrapper script (`./mvnw`). Always use the wrapper 
 
 Features intentionally deferred from initial implementations. **Check these before adding new engines or optimizations** — the gap may already be documented with design notes. Ignoring these has caused correctness bugs and performance regressions.
 
-- **DFA match semantics (CRITICAL)** — `docs/architecture/dfa-match-semantics-gap.md`: Our DFA uses leftmost-longest; upstream uses leftmost-first. This is the #1 performance/correctness gap. All DFA results require PikeVM verification until this is fixed.
+- **DFA char class overflow** — `docs/architecture/dfa-match-semantics-gap.md`: Byte-based class IDs limit to 256 equivalence classes. Unicode patterns auto-fall-back to quit-on-non-ASCII. Widening to `short` IDs is a future optimization.
 - **Lazy DFA gaps** — `docs/architecture/lazy-dfa-gaps.md`: overlapping mode, loop unrolling, per-pattern start states

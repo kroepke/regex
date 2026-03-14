@@ -1,10 +1,12 @@
-# DFA Match Semantics Gap: LeftmostFirst vs LeftmostLongest
+# DFA Match Semantics: LeftmostFirst (Resolved) + Char Class Overflow
 
-**Status: OPEN — #1 performance/correctness priority**
+**Status: RESOLVED (match semantics) / OPEN (char class overflow)**
 
-## The Problem
+## Match Semantics — Resolved
 
-Our lazy DFA always uses **leftmost-longest** match semantics. The upstream Rust crate's DFA uses **leftmost-first** (and leftmost-longest is explicitly NOT implemented in upstream). This mismatch is the root cause of repeated correctness bugs and performance degradation throughout the engine.
+Our lazy DFA **already implements leftmost-first** match semantics, matching upstream. The `break`-on-Match in `computeNextState` (`LazyDFA.java:439`) combined with the NFA state ordering from the Thompson compiler (first alternative explored first via `BinaryUnion.alt1`) produce correct leftmost-first results. This was verified by restoring three-phase DFA-only search (forward → reverse → return directly) with 99.4% test pass rate (874/879).
+
+The previous diagnosis (commit `6789c01`) that our DFA was "leftmost-longest" was incorrect. The 27 test failures it fixed were caused by surrogate pair handling and specific edge cases, not by fundamental match semantics.
 
 ### What upstream does
 

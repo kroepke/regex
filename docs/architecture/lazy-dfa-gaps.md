@@ -14,17 +14,15 @@ The reverse NFA compiler (`Compiler.compileReverse()`), reverse DFA search (`Laz
 
 **Design spec:** `docs/superpowers/specs/2026-03-11-reverse-dfa-design.md`
 
-## DFA Match Semantics: LeftmostLongest vs LeftmostFirst — CRITICAL GAP
+## DFA Match Semantics — RESOLVED
 
-**See `docs/architecture/dfa-match-semantics-gap.md` for full analysis.**
+**Status: DONE** (2026-03-14)
 
-**What:** Our DFA uses leftmost-longest semantics. The upstream Rust crate ONLY implements leftmost-first (`LeftmostLongest` is explicitly not supported upstream). This means our DFA results can disagree with PikeVM, requiring PikeVM verification for every search — eliminating the DFA-only fast path that upstream uses.
+Our DFA already implements leftmost-first semantics correctly via the `break`-on-Match in `computeNextState` and NFA state ordering. Three-phase DFA-only search (forward → reverse → return) is now active, matching upstream's `dfa/regex.rs:474-534`.
 
-**How upstream actually handles it:** The upstream DFA implements `LeftmostFirst` natively. All engines (DFA, PikeVM, backtracker) are semantically equivalent by construction. The upstream NEVER cross-validates between engines. Forward DFA → reverse DFA → return directly. No PikeVM verification.
+**Char class overflow:** Patterns with Unicode character classes (`\w`, `\d`) can produce >256 equivalence classes, exceeding the byte-based class ID limit. `CharClassBuilder` automatically falls back to quit-on-non-ASCII when this happens, allowing the DFA to handle ASCII portions while PikeVM handles non-ASCII. A future optimization would widen class IDs from `byte` to `short`.
 
-**Impact:** ~1000x slowdown for high-match-count patterns (`\w+`, `[a-zA-Z]+`) because every match requires PikeVM verification instead of DFA-only return.
-
-**Fix:** Implement `MatchKind.LeftmostFirst` in our DFA's epsilon closure. Medium-high complexity.
+See `docs/architecture/dfa-match-semantics-gap.md` for full analysis.
 
 ## Overlapping Match Mode
 
