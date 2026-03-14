@@ -93,13 +93,15 @@ public final class Regex {
                 boolean quitNonAscii = nfa.lookSetAny().containsUnicodeWord();
                 CharClasses charClasses = CharClassBuilder.build(nfa, quitNonAscii);
                 PikeVM pikeVM = new PikeVM(nfa);
-                LazyDFA forwardDFA = LazyDFA.create(nfa, charClasses);
+                LazyDFA forwardDFA = charClasses != null
+                        ? LazyDFA.create(nfa, charClasses) : null;
 
                 LazyDFA reverseDFA = null;
                 if (forwardDFA != null) {
                     NFA reverseNfa = Compiler.compileReverse(hir);
                     CharClasses reverseCharClasses = CharClassBuilder.build(reverseNfa, quitNonAscii);
-                    reverseDFA = LazyDFA.create(reverseNfa, reverseCharClasses);
+                    reverseDFA = reverseCharClasses != null
+                            ? LazyDFA.create(reverseNfa, reverseCharClasses) : null;
                 }
 
                 BoundedBacktracker backtracker = new BoundedBacktracker(nfa);
@@ -132,7 +134,8 @@ public final class Regex {
                             try {
                                 NFA prefixRevNfa = Compiler.compileReverse(innerLiteral.prefixHir());
                                 CharClasses prefixRevCc = CharClassBuilder.build(prefixRevNfa, quitNonAscii);
-                                LazyDFA prefixReverseDFA = LazyDFA.create(prefixRevNfa, prefixRevCc);
+                                LazyDFA prefixReverseDFA = prefixRevCc != null
+                                        ? LazyDFA.create(prefixRevNfa, prefixRevCc) : null;
                                 if (prefixReverseDFA != null) {
                                     strategy = new Strategy.ReverseInner(
                                             pikeVM, forwardDFA, prefixReverseDFA, innerPrefilter, backtracker);

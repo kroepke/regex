@@ -133,12 +133,14 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
         }
 
         /**
-         * Two-phase search: forward DFA narrows the window, PikeVM finds exact match.
+         * Three-phase search: forward DFA finds matchEnd, reverse DFA finds
+         * matchStart, return directly. Matches upstream Rust behavior at
+         * regex-automata/src/dfa/regex.rs:474-534.
          *
-         * <p>The forward DFA finds a (possibly overestimated) match end. PikeVM then
-         * runs on the narrowed window to find the correct leftmost-first match. This
-         * is necessary because the DFA uses leftmost-longest semantics which can
-         * disagree with PikeVM for lazy quantifiers and empty alternatives.</p>
+         * <p>Our DFA implements leftmost-first semantics (via the break-on-Match
+         * in computeNextState), so forward and reverse DFA results are correct
+         * without PikeVM verification. Falls back to PikeVM when the DFA gives
+         * up (e.g., Unicode word boundaries with quit chars).</p>
          */
         private Captures dfaSearch(Input input, Cache cache) {
             SearchResult fwdResult = forwardDFA.searchFwd(input, cache.forwardDFACache());
@@ -146,19 +148,51 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                 case SearchResult.NoMatch n -> null;
                 case SearchResult.GaveUp g -> pikeVM.search(input, cache.pikeVMCache());
                 case SearchResult.Match m -> {
-                    Input narrowed = input.withBounds(input.start(), m.offset(), false);
-                    yield pikeVM.search(narrowed, cache.pikeVMCache());
+                    int matchEnd = m.offset();
+                    if (matchEnd == input.start()) {
+                        // Empty match
+                        Captures caps = new Captures(1);
+                        caps.set(0, matchEnd);
+                        caps.set(1, matchEnd);
+                        yield caps;
+                    }
+                    if (input.isAnchored()) {
+                        Captures caps = new Captures(1);
+                        caps.set(0, input.start());
+                        caps.set(1, matchEnd);
+                        yield caps;
+                    }
+                    if (reverseDFA == null) {
+                        Input narrowed = input.withBounds(input.start(), matchEnd, false);
+                        yield pikeVM.search(narrowed, cache.pikeVMCache());
+                    }
+                    // Three-phase: reverse DFA finds match start
+                    Input revInput = input.withBounds(input.start(), matchEnd, true);
+                    SearchResult revResult = reverseDFA.searchRev(revInput, cache.reverseDFACache());
+                    yield switch (revResult) {
+                        case SearchResult.Match rm -> {
+                            Captures caps = new Captures(1);
+                            caps.set(0, rm.offset());
+                            caps.set(1, matchEnd);
+                            yield caps;
+                        }
+                        case SearchResult.GaveUp g2 -> {
+                            Input narrowed = input.withBounds(input.start(), matchEnd, false);
+                            yield pikeVM.search(narrowed, cache.pikeVMCache());
+                        }
+                        case SearchResult.NoMatch n2 -> {
+                            // Should not happen — fall back to PikeVM
+                            Input narrowed = input.withBounds(input.start(), matchEnd, false);
+                            yield pikeVM.search(narrowed, cache.pikeVMCache());
+                        }
+                    };
                 }
             };
         }
 
         /**
-         * Two-phase capture search: forward DFA narrows the window, then the
-         * capture engine (backtracker or PikeVM) finds exact match with groups.
-         *
-         * <p>Like {@link #dfaSearch}, the forward DFA may overestimate matchEnd
-         * for lazy quantifiers and empty alternatives. Running the capture engine
-         * on [start, matchEnd] guarantees correct leftmost-first semantics.</p>
+         * Three-phase capture search: forward DFA finds matchEnd, reverse DFA
+         * narrows the window, capture engine runs on the narrow window.
          */
         private Captures dfaSearchCaptures(Input input, Cache cache) {
             SearchResult fwdResult = forwardDFA.searchFwd(input, cache.forwardDFACache());
@@ -166,8 +200,32 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                 case SearchResult.NoMatch n -> null;
                 case SearchResult.GaveUp g -> pikeVM.searchCaptures(input, cache.pikeVMCache());
                 case SearchResult.Match m -> {
-                    Input narrowed = input.withBounds(input.start(), m.offset(), false);
-                    yield captureEngine(narrowed, cache);
+                    int matchEnd = m.offset();
+                    if (matchEnd == input.start() || input.isAnchored()) {
+                        Input narrowed = input.withBounds(input.start(), matchEnd, false);
+                        yield captureEngine(narrowed, cache);
+                    }
+                    if (reverseDFA == null) {
+                        Input narrowed = input.withBounds(input.start(), matchEnd, false);
+                        yield captureEngine(narrowed, cache);
+                    }
+                    // Three-phase: reverse DFA narrows window for capture engine
+                    Input revInput = input.withBounds(input.start(), matchEnd, true);
+                    SearchResult revResult = reverseDFA.searchRev(revInput, cache.reverseDFACache());
+                    yield switch (revResult) {
+                        case SearchResult.Match rm -> {
+                            Input narrowed = input.withBounds(rm.offset(), matchEnd, false);
+                            yield captureEngine(narrowed, cache);
+                        }
+                        case SearchResult.GaveUp g2 -> {
+                            Input narrowed = input.withBounds(input.start(), matchEnd, false);
+                            yield pikeVM.searchCaptures(narrowed, cache.pikeVMCache());
+                        }
+                        case SearchResult.NoMatch n2 -> {
+                            Input narrowed = input.withBounds(input.start(), matchEnd, false);
+                            yield captureEngine(narrowed, cache);
+                        }
+                    };
                 }
             };
         }

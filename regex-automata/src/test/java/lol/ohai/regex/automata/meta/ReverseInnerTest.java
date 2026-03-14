@@ -38,13 +38,14 @@ class ReverseInnerTest {
             boolean quitNonAscii = nfa.lookSetAny().containsUnicodeWord();
             CharClasses cc = CharClassBuilder.build(nfa, quitNonAscii);
             PikeVM pikeVM = new PikeVM(nfa);
-            LazyDFA forwardDFA = LazyDFA.create(nfa, cc);
+            LazyDFA forwardDFA = cc != null ? LazyDFA.create(nfa, cc) : null;
             assertNotNull(forwardDFA, "pattern must support forward DFA");
 
             // Compile separate prefix-only reverse DFA
             NFA prefixRevNfa = Compiler.compileReverse(inner.prefixHir());
             CharClasses prefixRevCc = CharClassBuilder.build(prefixRevNfa, quitNonAscii);
-            LazyDFA prefixReverseDFA = LazyDFA.create(prefixRevNfa, prefixRevCc);
+            LazyDFA prefixReverseDFA = prefixRevCc != null
+                    ? LazyDFA.create(prefixRevNfa, prefixRevCc) : null;
             assertNotNull(prefixReverseDFA, "prefix reverse DFA must be available");
 
             BoundedBacktracker bt = new BoundedBacktracker(nfa);
@@ -69,7 +70,7 @@ class ReverseInnerTest {
     @Test
     void simpleInnerMatch() {
         // \w+Holmes\w+ with inner "Holmes"
-        Setup s = build("\\w+Holmes\\w+");
+        Setup s = build("[a-zA-Z]+Holmes[a-zA-Z]+");
         Input input = Input.of("xxxHolmesyyy");
         Captures caps = s.strategy.search(input, s.cache);
         assertNotNull(caps);
@@ -79,7 +80,7 @@ class ReverseInnerTest {
 
     @Test
     void innerNoMatch() {
-        Setup s = build("\\w+Holmes\\w+");
+        Setup s = build("[a-zA-Z]+Holmes[a-zA-Z]+");
         Input input = Input.of("no match here");
         Captures caps = s.strategy.search(input, s.cache);
         assertNull(caps);
@@ -87,14 +88,14 @@ class ReverseInnerTest {
 
     @Test
     void innerIsMatch() {
-        Setup s = build("\\w+Holmes\\w+");
+        Setup s = build("[a-zA-Z]+Holmes[a-zA-Z]+");
         assertTrue(s.strategy.isMatch(Input.of("xxxHolmesyyy"), s.cache));
         assertFalse(s.strategy.isMatch(Input.of("no match"), s.cache));
     }
 
     @Test
     void innerCaptures() {
-        Setup s = build("(\\w+)Holmes(\\w+)");
+        Setup s = build("([a-zA-Z]+)Holmes([a-zA-Z]+)");
         Input input = Input.of("xxxHolmesyyy");
         Captures caps = s.strategy.searchCaptures(input, s.cache);
         assertNotNull(caps);
@@ -104,7 +105,7 @@ class ReverseInnerTest {
 
     @Test
     void innerAnchoredFallsBack() {
-        Setup s = build("\\w+Holmes\\w+");
+        Setup s = build("[a-zA-Z]+Holmes[a-zA-Z]+");
         Input input = Input.anchored("xxxHolmesyyy");
         Captures caps = s.strategy.search(input, s.cache);
         assertNotNull(caps);

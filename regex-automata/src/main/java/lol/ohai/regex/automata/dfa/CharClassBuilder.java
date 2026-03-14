@@ -14,74 +14,42 @@ public final class CharClassBuilder {
         return build(nfa, false);
     }
 
+    /**
+     * Build character equivalence classes for the DFA from the NFA's character
+     * ranges. Returns {@code null} if the pattern requires more than 256
+     * equivalence classes (the byte-based class ID limit).
+     *
+     * <p>When {@code quitNonAscii} is false but the class count exceeds 256
+     * (common for Unicode character classes like {@code \w}), this method
+     * automatically retries with quit-on-non-ASCII enabled. The DFA will then
+     * handle ASCII portions and give up on non-ASCII characters, falling back
+     * to PikeVM. This mirrors the upstream Rust crate's byte-based alphabet
+     * where the 256-class limit is inherent
+     * (upstream/regex/regex-automata/src/util/alphabet.rs).</p>
+     */
     public static CharClasses build(NFA nfa, boolean quitNonAscii) {
-        TreeSet<Integer> boundaries = new TreeSet<>();
-        boundaries.add(0);
-        boundaries.add(0x10000);
+        TreeSet<Integer> boundaries = collectBoundaries(nfa, quitNonAscii);
 
-        // If quit chars are configured, force a boundary at char 128 to
-        // separate ASCII chars (never quit) from non-ASCII chars (always quit).
-        if (quitNonAscii) {
-            boundaries.add(128);
-        }
-
-        for (int i = 0; i < nfa.stateCount(); i++) {
-            State state = nfa.state(i);
-            switch (state) {
-                case State.CharRange cr -> {
-                    boundaries.add(cr.start());
-                    boundaries.add(cr.end() + 1);
-                }
-                case State.Sparse sp -> {
-                    for (Transition t : sp.transitions()) {
-                        boundaries.add(t.start());
-                        boundaries.add(t.end() + 1);
-                    }
-                }
-                default -> {}
-            }
-        }
-
-        // Force boundaries for characters that look-assertions depend on.
-        // Without these, \n, \r, and word chars may collapse into a single
-        // class whose representative doesn't reflect the actual char type.
-        LookSet lookSetAny = nfa.lookSetAny();
-        if (!lookSetAny.isEmpty()) {
-            // Line terminators: needed for ^, $, START_LINE, END_LINE, etc.
-            boundaries.add((int) '\n');
-            boundaries.add((int) '\n' + 1);
-            boundaries.add((int) '\r');
-            boundaries.add((int) '\r' + 1);
-
-            if (lookSetAny.containsWord()) {
-                // Word char boundaries: [0-9A-Za-z_]
-                // Force boundaries at the edges of each word-char range
-                boundaries.add((int) '0');
-                boundaries.add((int) '9' + 1);
-                boundaries.add((int) 'A');
-                boundaries.add((int) 'Z' + 1);
-                boundaries.add((int) '_');
-                boundaries.add((int) '_' + 1);
-                boundaries.add((int) 'a');
-                boundaries.add((int) 'z' + 1);
-            }
+        if (boundaries.size() - 1 > 256 && !quitNonAscii) {
+            // Too many classes — retry with quit-on-non-ASCII to collapse
+            // all non-ASCII characters into quit classes.
+            boundaries = collectBoundaries(nfa, true);
+            quitNonAscii = true;
         }
 
         int[] sortedBounds = boundaries.stream().mapToInt(Integer::intValue).toArray();
         int classCount = sortedBounds.length - 1;
 
-        // Cap at 256 — byte storage limit
         if (classCount > 256) {
-            classCount = 256;
+            return null;
         }
 
         byte[] flatMap = new byte[65536];
         for (int cls = 0; cls < sortedBounds.length - 1; cls++) {
             int from = sortedBounds[cls];
             int to = Math.min(sortedBounds[cls + 1], 65536);
-            int mappedClass = Math.min(cls, classCount - 1);
             for (int c = from; c < to; c++) {
-                flatMap[c] = (byte) mappedClass;
+                flatMap[c] = (byte) cls;
             }
         }
 
@@ -130,6 +98,66 @@ public final class CharClassBuilder {
 
         return new CharClasses(uniqueRows.toArray(byte[][]::new), highIndex, classCount,
                 wordClass, lineLF, lineCR, quitClassArr);
+    }
+
+    /**
+     * Collect character class boundaries from the NFA's character ranges.
+     * When {@code quitNonAscii} is true, boundaries above 128 are collapsed
+     * (all non-ASCII characters become a single quit class).
+     */
+    private static TreeSet<Integer> collectBoundaries(NFA nfa, boolean quitNonAscii) {
+        TreeSet<Integer> boundaries = new TreeSet<>();
+        boundaries.add(0);
+        boundaries.add(0x10000);
+
+        if (quitNonAscii) {
+            boundaries.add(128);
+        }
+
+        for (int i = 0; i < nfa.stateCount(); i++) {
+            State state = nfa.state(i);
+            switch (state) {
+                case State.CharRange cr -> {
+                    boundaries.add(cr.start());
+                    boundaries.add(cr.end() + 1);
+                }
+                case State.Sparse sp -> {
+                    for (Transition t : sp.transitions()) {
+                        boundaries.add(t.start());
+                        boundaries.add(t.end() + 1);
+                    }
+                }
+                default -> {}
+            }
+        }
+
+        // When quit chars are configured, all non-ASCII characters trigger
+        // DFA quit — remove boundaries >= 129 to collapse them into one class.
+        if (quitNonAscii) {
+            boundaries.subSet(129, 0x10000).clear();
+        }
+
+        // Force boundaries for characters that look-assertions depend on.
+        LookSet lookSetAny = nfa.lookSetAny();
+        if (!lookSetAny.isEmpty()) {
+            boundaries.add((int) '\n');
+            boundaries.add((int) '\n' + 1);
+            boundaries.add((int) '\r');
+            boundaries.add((int) '\r' + 1);
+
+            if (lookSetAny.containsWord()) {
+                boundaries.add((int) '0');
+                boundaries.add((int) '9' + 1);
+                boundaries.add((int) 'A');
+                boundaries.add((int) 'Z' + 1);
+                boundaries.add((int) '_');
+                boundaries.add((int) '_' + 1);
+                boundaries.add((int) 'a');
+                boundaries.add((int) 'z' + 1);
+            }
+        }
+
+        return boundaries;
     }
 
     private static boolean isWordChar(char c) {

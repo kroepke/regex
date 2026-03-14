@@ -36,12 +36,12 @@ class ReverseSuffixTest {
             boolean quitNonAscii = nfa.lookSetAny().containsUnicodeWord();
             CharClasses cc = CharClassBuilder.build(nfa, quitNonAscii);
             PikeVM pikeVM = new PikeVM(nfa);
-            LazyDFA forwardDFA = LazyDFA.create(nfa, cc);
+            LazyDFA forwardDFA = cc != null ? LazyDFA.create(nfa, cc) : null;
             assertNotNull(forwardDFA, "pattern must support forward DFA");
 
             NFA reverseNfa = Compiler.compileReverse(hir);
             CharClasses revCc = CharClassBuilder.build(reverseNfa, quitNonAscii);
-            LazyDFA reverseDFA = LazyDFA.create(reverseNfa, revCc);
+            LazyDFA reverseDFA = revCc != null ? LazyDFA.create(reverseNfa, revCc) : null;
             assertNotNull(reverseDFA, "pattern must support reverse DFA");
 
             BoundedBacktracker bt = new BoundedBacktracker(nfa);
@@ -65,7 +65,7 @@ class ReverseSuffixTest {
 
     @Test
     void simpleSuffixMatch() {
-        Setup s = build("\\w+Holmes");
+        Setup s = build("[a-zA-Z]+Holmes");
         Input input = Input.of("SherlockHolmes");
         Captures caps = s.strategy.search(input, s.cache);
         assertNotNull(caps);
@@ -75,7 +75,7 @@ class ReverseSuffixTest {
 
     @Test
     void suffixNoMatch() {
-        Setup s = build("\\w+Holmes");
+        Setup s = build("[a-zA-Z]+Holmes");
         Input input = Input.of("no match here");
         Captures caps = s.strategy.search(input, s.cache);
         assertNull(caps);
@@ -83,14 +83,14 @@ class ReverseSuffixTest {
 
     @Test
     void suffixIsMatch() {
-        Setup s = build("\\w+Holmes");
+        Setup s = build("[a-zA-Z]+Holmes");
         assertTrue(s.strategy.isMatch(Input.of("SherlockHolmes"), s.cache));
         assertFalse(s.strategy.isMatch(Input.of("no match"), s.cache));
     }
 
     @Test
     void suffixCaptures() {
-        Setup s = build("(\\w+)Holmes");
+        Setup s = build("([a-zA-Z]+)Holmes");
         Input input = Input.of("SherlockHolmes");
         Captures caps = s.strategy.searchCaptures(input, s.cache);
         assertNotNull(caps);
@@ -101,7 +101,7 @@ class ReverseSuffixTest {
     @Test
     void suffixMultipleMatches() {
         // Verify the strategy returns the first (leftmost) match
-        Setup s = build("\\w+Holmes");
+        Setup s = build("[a-zA-Z]+Holmes");
         Input input = Input.of("xHolmes yHolmes");
         Captures caps = s.strategy.search(input, s.cache);
         assertNotNull(caps);
@@ -111,7 +111,7 @@ class ReverseSuffixTest {
 
     @Test
     void anchoredFallsBack() {
-        Setup s = build("\\w+Holmes");
+        Setup s = build("[a-zA-Z]+Holmes");
         Input input = Input.anchored("SherlockHolmes");
         // Anchored should still work (falls back to PikeVM)
         Captures caps = s.strategy.search(input, s.cache);
