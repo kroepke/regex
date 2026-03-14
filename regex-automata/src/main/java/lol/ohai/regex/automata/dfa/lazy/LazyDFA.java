@@ -124,7 +124,7 @@ public final class LazyDFA {
 
             // Slow path: UNKNOWN, DEAD, or QUIT
             if (nextSid == DFACache.UNKNOWN) {
-                nextSid = computeNextState(cache, sid, classId);
+                nextSid = computeNextState(cache, sid, classId, haystack[pos]);
                 if (nextSid == quit) return new SearchResult.GaveUp(pos);
                 cache.setTransition(sid, classId, nextSid);
                 sid = nextSid;
@@ -160,7 +160,7 @@ public final class LazyDFA {
                 if (charClasses.hasQuitClasses() && charClasses.isQuitClass(classId)) {
                     return new SearchResult.GaveUp(end);
                 }
-                rightEdgeSid = computeNextState(cache, rawSid, classId);
+                rightEdgeSid = computeNextState(cache, rawSid, classId, haystack[end]);
             } else {
                 rightEdgeSid = computeNextState(cache, rawSid, charClasses.eoiClass());
             }
@@ -222,7 +222,7 @@ public final class LazyDFA {
             }
 
             if (nextSid == DFACache.UNKNOWN) {
-                nextSid = computeNextState(cache, sid, classId);
+                nextSid = computeNextState(cache, sid, classId, haystack[pos]);
                 if (nextSid == quit) return new SearchResult.GaveUp(pos);
                 cache.setTransition(sid, classId, nextSid);
                 sid = nextSid;
@@ -255,7 +255,7 @@ public final class LazyDFA {
                     // Char before span is a quit char — give up
                     return new SearchResult.GaveUp(start);
                 }
-                leftEdgeSid = computeNextState(cache, rawSid, classId);
+                leftEdgeSid = computeNextState(cache, rawSid, classId, haystack[start - 1]);
             } else {
                 leftEdgeSid = computeNextState(cache, rawSid, charClasses.eoiClass());
             }
@@ -355,7 +355,21 @@ public final class LazyDFA {
      * source state (before char transitions). Phase 2 computes look-behind
      * context on the destination state (after char transitions).</p>
      */
+    /**
+     * Compute next state without an input char (used for EOI transitions).
+     * Falls back to class-based range check in charInRange.
+     */
     private int computeNextState(DFACache cache, int sourceSid, int classId) {
+        return computeNextState(cache, sourceSid, classId, -1);
+    }
+
+    /**
+     * Compute next state with an input char for direct range comparison.
+     * When {@code inputChar >= 0}, charInRange uses direct comparison
+     * (correct with merged equivalence classes). When {@code inputChar < 0}
+     * (EOI), falls back to class-based comparison.
+     */
+    private int computeNextState(DFACache cache, int sourceSid, int classId, int inputChar) {
         int rawSourceId = sourceSid & 0x7FFF_FFFF;
         StateContent sourceContent = cache.getState(rawSourceId);
 
@@ -448,13 +462,13 @@ public final class LazyDFA {
             State state = nfa.state(nfaStateId);
             switch (state) {
                 case State.CharRange cr -> {
-                    if (charInRange(classId, cr.start(), cr.end())) {
+                    if (charInRange(classId, inputChar, cr.start(), cr.end())) {
                         epsilonClosure(cache, cr.next(), destLookHaveSet);
                     }
                 }
                 case State.Sparse sp -> {
                     for (Transition t : sp.transitions()) {
-                        if (charInRange(classId, t.start(), t.end())) {
+                        if (charInRange(classId, inputChar, t.start(), t.end())) {
                             epsilonClosure(cache, t.next(), destLookHaveSet);
                             break;
                         }
@@ -577,10 +591,17 @@ public final class LazyDFA {
     }
 
     /**
-     * Check if the given equivalence class overlaps with [rangeStart, rangeEnd].
+     * Check if the input matches the NFA transition range [rangeStart, rangeEnd].
+     * Uses direct char comparison when available (correct with merged equivalence
+     * classes). Falls back to class-ID comparison for EOI transitions.
+     * Ref: upstream/regex/regex-automata/src/util/determinize/mod.rs:288-289
+     * (upstream uses trans.matches_unit(unit) — a direct byte comparison)
      */
-    private boolean charInRange(int classId, int rangeStart, int rangeEnd) {
+    private boolean charInRange(int classId, int inputChar, int rangeStart, int rangeEnd) {
         if (rangeStart > 0xFFFF || rangeEnd > 0xFFFF) return false;
+        if (inputChar >= 0) {
+            return inputChar >= rangeStart && inputChar <= rangeEnd;
+        }
         return classId >= charClasses.classify((char) rangeStart)
                 && classId <= charClasses.classify((char) rangeEnd);
     }

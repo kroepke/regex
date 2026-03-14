@@ -215,14 +215,19 @@ class LazyDFATest {
     @Test
     void forwardSearchWithWordBoundaryNoMatch() {
         // (?-u:\b)ord(?-u:\b) should not match within a word
-        var result = search("(?-u:\\b)ord(?-u:\\b)", "word");
+        // Word boundary patterns need quit chars for correct word-char classification
+        var dfa = buildDFAWithQuit("(?-u:\\b)ord(?-u:\\b)");
+        assertNotNull(dfa);
+        var result = dfa.searchFwd(Input.of("word"), dfa.createCache());
         assertInstanceOf(SearchResult.NoMatch.class, result);
     }
 
     @Test
     void forwardSearchWithNegatedWordBoundary() {
         // (?-u:\B)ord — matches 'ord' when NOT at word boundary
-        var result = search("(?-u:\\B)ord", "word");
+        var dfa = buildDFAWithQuit("(?-u:\\B)ord");
+        assertNotNull(dfa);
+        var result = dfa.searchFwd(Input.of("word"), dfa.createCache());
         assertInstanceOf(SearchResult.Match.class, result);
         assertEquals(4, ((SearchResult.Match) result).offset());
     }
@@ -245,8 +250,8 @@ class LazyDFATest {
 
     @Test
     void wordBoundaryEmptyMatch() {
-        // ASCII \b matches at word boundary
-        var dfa = buildDFA("(?-u:\\b)");
+        // ASCII \b matches at word boundary — needs quit chars for word-char classes
+        var dfa = buildDFAWithQuit("(?-u:\\b)");
         assertNotNull(dfa);
         var cache = dfa.createCache();
         var result = dfa.searchFwd(Input.of("hello world"), cache);

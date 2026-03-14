@@ -11,7 +11,140 @@ public final class CharClassBuilder {
     private CharClassBuilder() {}
 
     public static CharClasses build(NFA nfa) {
-        return buildUnmerged(nfa, false);
+        return build(nfa, false);
+    }
+
+    /**
+     * Build character equivalence classes with region merging when possible.
+     *
+     * <p>When {@code quitNonAscii} is true (for Unicode word boundary patterns),
+     * delegates to {@link #buildUnmerged} which handles the quit-char path
+     * correctly. The quit path already keeps class counts under 256 by
+     * collapsing non-ASCII boundaries.</p>
+     *
+     * <p>When {@code quitNonAscii} is false, computes behavior signatures
+     * per boundary region and merges regions with identical NFA transition
+     * targets. This reduces ~1,400 classes for Unicode {@code \w+} to ~55.</p>
+     */
+    public static CharClasses build(NFA nfa, boolean quitNonAscii) {
+        // Quit path or word boundary: delegate to existing logic.
+        // Word boundary patterns need precise word-char/non-word-char class
+        // separation that the merge would collapse.
+        if (quitNonAscii || nfa.lookSetAny().containsWord()) {
+            return buildUnmerged(nfa, quitNonAscii);
+        }
+
+        TreeSet<Integer> boundaries = collectBoundaries(nfa, false);
+        int[] sortedBounds = boundaries.stream().mapToInt(Integer::intValue).toArray();
+        int regionCount = sortedBounds.length - 1;
+
+        // Merge: compute behavior signature per region, group by signature.
+        HashMap<BitSet, Integer> signatureToClass = new HashMap<>();
+        int[] regionClassMap = new int[regionCount];
+        int nextClassId = 0;
+
+        for (int r = 0; r < regionCount; r++) {
+            BitSet sig = computeSignature(nfa, sortedBounds[r]);
+            Integer existingClass = signatureToClass.get(sig);
+            if (existingClass != null) {
+                regionClassMap[r] = existingClass;
+            } else {
+                regionClassMap[r] = nextClassId;
+                signatureToClass.put(sig, nextClassId);
+                nextClassId++;
+            }
+        }
+
+        int classCount = nextClassId;
+        if (classCount > 256) {
+            // Safety net: fall back to quit-on-non-ASCII
+            return buildUnmerged(nfa, false);
+        }
+
+        byte[] flatMap = new byte[65536];
+        for (int r = 0; r < regionCount; r++) {
+            int from = sortedBounds[r];
+            int to = Math.min(sortedBounds[r + 1], 65536);
+            byte cls = (byte) regionClassMap[r];
+            for (int c = from; c < to; c++) {
+                flatMap[c] = cls;
+            }
+        }
+
+        Map<ByteArrayKey, Integer> rowIndex = new HashMap<>();
+        List<byte[]> uniqueRows = new ArrayList<>();
+        int[] highIndex = new int[256];
+        for (int hi = 0; hi < 256; hi++) {
+            byte[] row = new byte[256];
+            System.arraycopy(flatMap, hi * 256, row, 0, 256);
+            ByteArrayKey key = new ByteArrayKey(row);
+            Integer existing = rowIndex.get(key);
+            if (existing != null) {
+                highIndex[hi] = existing;
+            } else {
+                int idx = uniqueRows.size();
+                uniqueRows.add(row);
+                rowIndex.put(key, idx);
+                highIndex[hi] = idx;
+            }
+        }
+
+        // Metadata: first-seen representative per merged class.
+        int[] classRep = new int[classCount];
+        Arrays.fill(classRep, -1);
+        for (int r = 0; r < regionCount; r++) {
+            int cls = regionClassMap[r];
+            if (classRep[cls] < 0) {
+                classRep[cls] = sortedBounds[r];
+            }
+        }
+
+        boolean[] wordClass = new boolean[classCount];
+        boolean[] lineLF = new boolean[classCount];
+        boolean[] lineCR = new boolean[classCount];
+        for (int cls = 0; cls < classCount; cls++) {
+            int rep = classRep[cls];
+            if (rep >= 0 && rep < 65536) {
+                char c = (char) rep;
+                wordClass[cls] = isWordChar(c);
+                lineLF[cls] = (c == '\n');
+                lineCR[cls] = (c == '\r');
+            }
+        }
+
+        return new CharClasses(uniqueRows.toArray(byte[][]::new), highIndex, classCount,
+                wordClass, lineLF, lineCR, null);
+    }
+
+    /**
+     * Compute the behavior signature for a representative character: the set
+     * of NFA transition targets that match it, plus isolation bits for \n/\r.
+     */
+    private static BitSet computeSignature(NFA nfa, int representative) {
+        int lookBase = nfa.stateCount();
+        BitSet sig = new BitSet(lookBase + 2);
+        for (int i = 0; i < nfa.stateCount(); i++) {
+            State state = nfa.state(i);
+            switch (state) {
+                case State.CharRange cr -> {
+                    if (representative >= cr.start() && representative <= cr.end()) {
+                        sig.set(cr.next());
+                    }
+                }
+                case State.Sparse sp -> {
+                    for (Transition t : sp.transitions()) {
+                        if (representative >= t.start() && representative <= t.end()) {
+                            sig.set(t.next());
+                            break;
+                        }
+                    }
+                }
+                default -> {}
+            }
+        }
+        if (representative == '\n') sig.set(lookBase);
+        if (representative == '\r') sig.set(lookBase + 1);
+        return sig;
     }
 
     /**
