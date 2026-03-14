@@ -41,4 +41,4 @@ Commit `6789c01` removed three-phase search based on the diagnosis that "the DFA
 
 **Remaining limitation:** Patterns with word boundary assertions (`\b`) skip the merge and use the old `buildUnmerged` path, because the merge collapses word-char/non-word-char distinctions needed for look-behind context. These patterns still use quit-on-non-ASCII for Unicode `\b`.
 
-**Performance:** The merge eliminates the class overflow, but `unicodeWord` performance (~18 ops/s) didn't improve because the DFA with 55 classes has a larger stride (64 vs 16) and the lazy DFA cache thrashes on the diverse Unicode state space. The next optimization is DFA cache tuning.
+**Performance:** After adding surrogate-pair target resolution (`resolveTarget`), both forward AND reverse DFAs merge to small class counts (~55 forward, ~2 reverse). `unicodeWord` improved from 18 ops/s to 13,499 ops/s (2.3x slower than JDK, down from 2,090x).

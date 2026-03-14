@@ -22,7 +22,7 @@ Our DFA already implements leftmost-first semantics correctly via the `break`-on
 
 **Char class overflow:** Resolved via equivalence class merging. `CharClassBuilder.build()` merges boundary regions with identical NFA transition targets, reducing `\w+` from ~1,400 regions to ~55 classes. Patterns with `\b` skip the merge and use quit-on-non-ASCII.
 
-**Performance gap:** `unicodeWord` (`\w+` on mixed text) is still ~18 ops/s despite the DFA handling full Unicode. The bottleneck is now DFA cache thrashing — 55 classes × diverse Unicode codepoints produces a large state space that overwhelms the lazy DFA cache. Next optimization: DFA cache tuning (capacity, eviction strategy).
+**Performance:** After surrogate-pair target resolution, `unicodeWord` improved from 18 ops/s to 13,499 ops/s (2.3x slower than JDK). Forward NFA merges to ~55 classes, reverse NFA merges to ~2 classes. No quit-on-non-ASCII fallback needed.
 
 See `docs/architecture/dfa-match-semantics-gap.md` for full analysis.
 

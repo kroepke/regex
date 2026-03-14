@@ -68,19 +68,36 @@ Discovered that the DFA was already leftmost-first (break-on-Match in `computeNe
 - Key wins vs stage 5: charClass **6.1x faster** (11.6 → 70.6), captures **3.2x faster** (110.6 → 350)
 - Remaining gap: unicodeWord limited by 256-class char class overflow (needs byte→short class IDs)
 
+### stage-7-charclass-merge (`2abfe9a`)
+**Equivalence class merging for Unicode char class overflow**
+
+Added equivalence class merging to `CharClassBuilder`. Boundary regions with identical NFA transition targets (using `cr.next()` with surrogate-pair resolution) are collapsed into a single class. This eliminates the 256-class overflow for Unicode patterns like `\w+` without falling back to quit-on-non-ASCII.
+
+- Engines: PikeVM + forward/reverse lazy DFA + bounded backtracker
+- Strategies: Core (three-phase DFA), PrefilterOnly, ReverseSuffix, ReverseInner
+- Tests: 2,160 total (6 new merge tests), 879/879 upstream, 0 failures
+- Key win: unicodeWord **750x faster** (18.3 → 13,499 ops/s), now **2.3x slower** than JDK (was 2,090x)
+- Other benchmarks unchanged
+
+Key fixes:
+- `computeSignature` uses `cr.next()` (transition target) not state ID — all word-char ranges sharing the same loop-back merge into one class
+- `resolveTarget` follows surrogate-pair CharRange chains to the ultimate non-surrogate target — prevents reverse NFA from producing 440 signatures instead of 2
+- `charInRange` in LazyDFA changed to direct char comparison (class-ID ordering breaks with merge)
+- Patterns with `\b` skip merge, use existing quit-on-non-ASCII path
+
 ## Benchmark Comparison (same machine, 2026-03-14)
 
-| Benchmark | S1 | S2 | S3 | S4 | S5 | S6 |
-|---|---|---|---|---|---|---|
-| literal (ops/s) | 14 | 4,746 | 4,225 | 4,491 | 4,380 | 4,663 |
-| charClass | 0.06 | 9.5 | 11.0 | 69.5 | 11.6 | 70.6 |
-| alternation | 6.5 | 44.8 | 44.3 | 44.4 | 43.1 | 45.0 |
-| captures | 60 | 58.8 | 58.7 | 452 | 110.6 | 350 |
-| unicodeWord | 13 | 12.9 | 12.6 | 15,717 | 12.3 | 18.3 |
-| backtrack | 489K | 16.4M | 19.9M | 16.0M | 141M | — |
-| redosShort | 40.7K | 37.9K | 38.0K | 2.3M | 35.3K | — |
+| Benchmark | S1 | S2 | S3 | S4 | S5 | S6 | S7 |
+|---|---|---|---|---|---|---|---|
+| literal (ops/s) | 14 | 4,746 | 4,225 | 4,491 | 4,380 | 4,663 | 4,543 |
+| charClass | 0.06 | 9.5 | 11.0 | 69.5 | 11.6 | 70.6 | 75.1 |
+| alternation | 6.5 | 44.8 | 44.3 | 44.4 | 43.1 | 45.0 | 45.0 |
+| captures | 60 | 58.8 | 58.7 | 452 | 110.6 | 350 | 356 |
+| unicodeWord | 13 | 12.9 | 12.6 | 15,717 | 12.3 | 18.3 | **13,499** |
+| backtrack | 489K | 16.4M | 19.9M | 16.0M | 141M | — | — |
+| redosShort | 40.7K | 37.9K | 38.0K | 2.3M | 35.3K | — | — |
 
 Notes:
-- S4 unicodeWord (15,717) was based on three-phase with DFA edge bugs (27 test failures). S6 unicodeWord (18.3) is correct but limited by char class overflow.
-- S5 regressions vs S4 (charClass, captures, unicodeWord) were caused by the removal of three-phase search in commit `6789c01`, not by the prefilter work.
-- Backtrack and redosShort not re-measured at S6 (no changes to those code paths).
+- S4 unicodeWord (15,717) was based on three-phase with DFA edge bugs (27 test failures). S7 unicodeWord (13,499) is fully correct.
+- S5 regressions vs S4 were caused by the removal of three-phase search, not the prefilter work.
+- S7 unicodeWord improvement is from equivalence class merging + surrogate-pair resolution, enabling the DFA to handle full Unicode without quit fallback.

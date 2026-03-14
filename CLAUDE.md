@@ -125,5 +125,5 @@ Then add an entry to `docs/architecture/stage-progression.md` describing: what c
 
 Features intentionally deferred from initial implementations. **Check these before adding new engines or optimizations** — the gap may already be documented with design notes. Ignoring these has caused correctness bugs and performance regressions.
 
-- **DFA char class overflow** — `docs/architecture/dfa-match-semantics-gap.md`: Byte-based class IDs limit to 256 equivalence classes. Unicode patterns auto-fall-back to quit-on-non-ASCII. Widening to `short` IDs is a future optimization.
+- **DFA char class overflow (resolved)** — `docs/architecture/dfa-match-semantics-gap.md`: Equivalence class merging keeps class counts under 256 for Unicode patterns. Patterns with `\b` still use quit-on-non-ASCII.
 - **Lazy DFA gaps** — `docs/architecture/lazy-dfa-gaps.md`: overlapping mode, loop unrolling, per-pattern start states
