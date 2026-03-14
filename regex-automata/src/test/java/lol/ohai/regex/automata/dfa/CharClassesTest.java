@@ -7,6 +7,9 @@ import lol.ohai.regex.syntax.ast.Parser;
 import lol.ohai.regex.syntax.hir.Hir;
 import lol.ohai.regex.syntax.hir.Translator;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class CharClassesTest {
@@ -101,6 +104,115 @@ class CharClassesTest {
         assertTrue(cc.isQuitClass(cc.classify('\u00E9'))); // é
         assertTrue(cc.isQuitClass(cc.classify('\u4E2D'))); // 中
         assertTrue(cc.isQuitClass(cc.classify('\u0080'))); // first non-ASCII
+    }
+
+    // --- Merge tests (some will fail until Task 3 implements the merge step) ---
+
+    @Test
+    void mergedBuildHandlesUnicodeWordClass() throws Exception {
+        NFA nfa = compileNfa("\\w+");
+        CharClasses cc = CharClassBuilder.build(nfa);
+        assertNotNull(cc, "merged build should succeed for \\w+");
+        assertTrue(cc.classCount() <= 30,
+                "merged \\w+ should have <= 30 classes, got " + cc.classCount());
+        assertFalse(cc.hasQuitClasses(), "merged \\w+ should not have quit classes");
+    }
+
+    @Test
+    void mergedBuildClassifiesUnicodeCorrectly() throws Exception {
+        NFA nfa = compileNfa("\\w+");
+        CharClasses cc = CharClassBuilder.build(nfa);
+        assertNotNull(cc, "merged build should succeed for \\w+");
+
+        // 'a' and 'z' are both word chars — same class
+        assertEquals(cc.classify('a'), cc.classify('z'),
+                "'a' and 'z' should be in the same class");
+
+        // \u2961 is a math symbol (not a word char), should differ from 'a'
+        assertNotEquals(cc.classify('\u2961'), cc.classify('a'),
+                "math symbol \\u2961 should differ from word char 'a'");
+
+        // \u2961 and \u2962 are adjacent non-word chars — should share a class
+        assertEquals(cc.classify('\u2961'), cc.classify('\u2962'),
+                "adjacent non-word chars \\u2961 and \\u2962 should share a class");
+    }
+
+    @Test
+    void mergedBuildPreservesQuitForWordBoundary() throws Exception {
+        NFA nfa = compileNfa("\\b\\w+\\b");
+        assertTrue(nfa.lookSetAny().containsUnicodeWord(),
+                "\\b pattern should contain Unicode word boundary assertion");
+
+        // Use buildUnmerged with quit=true (tests the quit path which is unchanged)
+        CharClasses cc = CharClassBuilder.buildUnmerged(nfa, true);
+        assertNotNull(cc, "buildUnmerged with quit should succeed");
+        assertTrue(cc.hasQuitClasses(), "word boundary pattern with quit should have quit classes");
+    }
+
+    @Test
+    void mergedBuildPreservesLineFeedIsolation() throws Exception {
+        NFA nfa = compileNfa("(?m)^\\w+$");
+        CharClasses cc = CharClassBuilder.build(nfa);
+        assertNotNull(cc, "merged build should succeed for (?m)^\\w+$");
+
+        int lfClass = cc.classify('\n');
+        int spaceClass = cc.classify(' ');
+
+        assertTrue(cc.isLineLF(lfClass), "'\\n' class should have isLineLF true");
+        assertFalse(cc.isLineLF(spaceClass), "' ' class should NOT have isLineLF true");
+        assertNotEquals(lfClass, spaceClass,
+                "'\\n' and ' ' should be in different classes");
+    }
+
+    @Test
+    void mergedAndUnmergedAgreeOnSimplePatterns() throws Exception {
+        List<String> patterns = List.of("[a-z]+", "abc", "[0-9a-fA-F]+", "Sherlock|Watson");
+
+        for (String pattern : patterns) {
+            NFA nfa = compileNfa(pattern);
+            CharClasses merged = CharClassBuilder.build(nfa);
+            CharClasses unmerged = CharClassBuilder.buildUnmerged(nfa, false);
+
+            assertNotNull(merged, "merged build should succeed for: " + pattern);
+            assertNotNull(unmerged, "unmerged build should succeed for: " + pattern);
+
+            // For all ASCII char pairs: if unmerged groups them, merged must too
+            for (int c = 0; c < 128; c++) {
+                for (int d = c + 1; d < 128; d++) {
+                    int unmergedC = unmerged.classify((char) c);
+                    int unmergedD = unmerged.classify((char) d);
+                    if (unmergedC == unmergedD) {
+                        int mergedC = merged.classify((char) c);
+                        int mergedD = merged.classify((char) d);
+                        assertEquals(mergedC, mergedD,
+                                "pattern '" + pattern + "': chars " + c + " and " + d
+                                        + " share unmerged class but differ in merged");
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void compareClassCountsMergedVsUnmerged() throws Exception {
+        NFA nfa = compileNfa("\\w+");
+
+        CharClasses merged = CharClassBuilder.build(nfa);
+        assertNotNull(merged, "merged build should succeed for \\w+");
+
+        CharClasses unmerged = CharClassBuilder.buildUnmerged(nfa, false);
+        assertNull(unmerged, "unmerged build should return null (overflow) for \\w+");
+
+        System.out.println("Merged class count: " + merged.classCount());
+        System.out.println("Merged stride: " + merged.stride());
+    }
+
+    // --- Helpers ---
+
+    private static NFA compileNfa(String pattern) throws Exception {
+        Ast ast = Parser.parse(pattern, 250);
+        Hir hir = Translator.translate(pattern, ast);
+        return Compiler.compile(hir);
     }
 
     private static CharClasses buildCharClasses(String pattern) {
