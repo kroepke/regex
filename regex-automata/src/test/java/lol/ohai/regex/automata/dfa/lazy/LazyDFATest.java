@@ -405,6 +405,73 @@ class LazyDFATest {
         assertEquals(6, ((SearchResult.Match) result).offset());
     }
 
+    // -- Loop unrolling edge cases (reverse) --
+
+    @Test
+    void revEmptySpan() {
+        // 0-length span: start == end, main loop never enters.
+        // Use a pattern that won't match at the left-edge transition.
+        SearchResult result = searchReverse("xyz", "abc", 1, 1);
+        assertInstanceOf(SearchResult.NoMatch.class, result);
+    }
+
+    @Test
+    void revOneCharMatch() {
+        SearchResult result = searchReverse("a", "a", 0, 1);
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(0, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void revTwoCharMatch() {
+        SearchResult result = searchReverse("ab", "ab", 0, 2);
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(0, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void revThreeCharMatch() {
+        SearchResult result = searchReverse("abc", "abc", 0, 3);
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(0, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void revExactlyFourCharMatch() {
+        SearchResult result = searchReverse("abcd", "abcd", 0, 4);
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(0, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void revFiveCharMatch() {
+        SearchResult result = searchReverse("abcde", "abcde", 0, 5);
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(0, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void revLongLiteralMatch() {
+        SearchResult result = searchReverse("abcdefgh", "xxabcdefghxx", 0, 10);
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(2, ((SearchResult.Match) result).offset());
+    }
+
+    @Test
+    void revNoMatchLongInput() {
+        SearchResult result = searchReverse("ZQZQ", "abcdefghijklmnopqrstuvwxyz", 0, 26);
+        assertInstanceOf(SearchResult.NoMatch.class, result);
+    }
+
+    @Test
+    void revMatchMidStreamAfterFullUnroll() {
+        // 8-char span, match start at pos 3: reverse from pos 7, one full
+        // unrolled iteration (7,6,5,4), then break-out when match state hit.
+        SearchResult result = searchReverse("[a-z]{5}", "XXXabcde", 0, 8);
+        assertInstanceOf(SearchResult.Match.class, result);
+        assertEquals(3, ((SearchResult.Match) result).offset());
+    }
+
     // -- Helpers --
 
     private SearchResult search(String pattern, String haystack) {
