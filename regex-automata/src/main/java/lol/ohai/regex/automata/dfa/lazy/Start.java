@@ -35,12 +35,32 @@ public enum Start {
      * @param pos      the search start position (0-based)
      * @return the Start variant for this position
      */
+    /**
+     * Determine the start variant for a forward search at position {@code pos}.
+     * Look-behind context comes from the char before {@code pos}.
+     * Ref: upstream/regex/regex-automata/src/util/start.rs:141-147
+     */
     public static Start from(char[] haystack, int pos) {
         if (pos == 0) return TEXT;
         char prev = haystack[pos - 1];
         if (prev == '\n') return LINE_LF;
         if (prev == '\r') return LINE_CR;
         if (isWordChar(prev)) return WORD_BYTE;
+        return NON_WORD_BYTE;
+    }
+
+    /**
+     * Determine the start variant for a reverse search ending at position {@code end}.
+     * Look-behind context (in the reverse direction) comes from the char AT
+     * {@code end} (the first char after the search span in forward direction).
+     * Ref: upstream/regex/regex-automata/src/util/start.rs:155-158
+     */
+    public static Start fromReverse(char[] haystack, int end) {
+        if (end >= haystack.length) return TEXT;
+        char next = haystack[end];
+        if (next == '\n') return LINE_LF;
+        if (next == '\r') return LINE_CR;
+        if (isWordChar(next)) return WORD_BYTE;
         return NON_WORD_BYTE;
     }
 
