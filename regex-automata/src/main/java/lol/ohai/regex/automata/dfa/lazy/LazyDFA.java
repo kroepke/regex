@@ -138,7 +138,9 @@ public final class LazyDFA {
             }
             if (nextSid == dead) {
                 // Dead state: no further progress possible.
-                // If we have a match recorded, return it. Otherwise, no match.
+                // Set sid = dead so the right-edge transition is skipped
+                // (it should only fire on non-dead states).
+                sid = dead;
                 break;
             }
             // nextSid == quit
@@ -233,6 +235,7 @@ public final class LazyDFA {
                 continue;
             }
             if (nextSid == dead) {
+                sid = dead;
                 break;
             }
             return new SearchResult.GaveUp(pos);
