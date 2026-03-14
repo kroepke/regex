@@ -128,13 +128,13 @@ public final class CharClassBuilder {
             switch (state) {
                 case State.CharRange cr -> {
                     if (representative >= cr.start() && representative <= cr.end()) {
-                        sig.set(cr.next());
+                        sig.set(resolveTarget(nfa, cr.next()));
                     }
                 }
                 case State.Sparse sp -> {
                     for (Transition t : sp.transitions()) {
                         if (representative >= t.start() && representative <= t.end()) {
-                            sig.set(t.next());
+                            sig.set(resolveTarget(nfa, t.next()));
                             break;
                         }
                     }
@@ -145,6 +145,26 @@ public final class CharClassBuilder {
         if (representative == '\n') sig.set(lookBase);
         if (representative == '\r') sig.set(lookBase + 1);
         return sig;
+    }
+
+    /**
+     * Follow a chain of surrogate-pair CharRange states to the ultimate target.
+     * Only resolves through CharRange states whose range falls in the surrogate
+     * zone (0xD800-0xDFFF). This collapses intermediate surrogate states
+     * without affecting normal char sequences (like 'c' → 'a' → 't' in "cat").
+     */
+    private static int resolveTarget(NFA nfa, int stateId) {
+        int limit = 4; // surrogate pairs are at most 2 chars deep
+        while (limit-- > 0 && stateId < nfa.stateCount()) {
+            State s = nfa.state(stateId);
+            if (s instanceof State.CharRange cr
+                    && cr.start() >= 0xD800 && cr.end() <= 0xDFFF) {
+                stateId = cr.next();
+            } else {
+                break;
+            }
+        }
+        return stateId;
     }
 
     /**
