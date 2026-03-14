@@ -44,6 +44,18 @@ public class SearchBenchmark {
     private Regex ohaiUnicodeWord;
     private Pattern jdkUnicodeWord;
 
+    // Loop unrolling stress: high state-creation (worst case for unrolling)
+    private Regex ohaiWordRepeat;
+    private Pattern jdkWordRepeat;
+
+    // Loop unrolling stress: moderate transitions with look-around
+    private Regex ohaiMultiline;
+    private Pattern jdkMultiline;
+
+    // Loop unrolling stress: literal not found, mostly self-transitions (best case)
+    private Regex ohaiLiteralMiss;
+    private Pattern jdkLiteralMiss;
+
     @Setup(Level.Trial)
     public void setup() {
         ohaiLiteral = Regex.compile("Sherlock Holmes");
@@ -60,6 +72,15 @@ public class SearchBenchmark {
 
         ohaiUnicodeWord = Regex.compile("\\w+");
         jdkUnicodeWord = Pattern.compile("\\w+", Pattern.UNICODE_CHARACTER_CLASS);
+
+        ohaiWordRepeat = Regex.compile("\\w{50}");
+        jdkWordRepeat = Pattern.compile("\\w{50}", Pattern.UNICODE_CHARACTER_CLASS);
+
+        ohaiMultiline = Regex.compile("(?m)^.+$");
+        jdkMultiline = Pattern.compile("(?m)^.+$");
+
+        ohaiLiteralMiss = Regex.compile("ZQZQZQZQ");
+        jdkLiteralMiss = Pattern.compile("ZQZQZQZQ");
     }
 
     // ---- Literal: "Sherlock Holmes" in English text ----
@@ -134,6 +155,51 @@ public class SearchBenchmark {
     @Benchmark
     public void unicodeWordJdk(Blackhole bh) {
         Matcher m = jdkUnicodeWord.matcher(Haystacks.UNICODE_MIXED);
+        while (m.find()) {
+            bh.consume(m.start());
+        }
+    }
+
+    // ---- Loop unrolling stress: \w{50} (high state creation) ----
+
+    @Benchmark
+    public void wordRepeatOhai(Blackhole bh) {
+        ohaiWordRepeat.findAll(Haystacks.UNICODE_MIXED).forEach(bh::consume);
+    }
+
+    @Benchmark
+    public void wordRepeatJdk(Blackhole bh) {
+        Matcher m = jdkWordRepeat.matcher(Haystacks.UNICODE_MIXED);
+        while (m.find()) {
+            bh.consume(m.start());
+        }
+    }
+
+    // ---- Loop unrolling stress: (?m)^.+$ (multiline look-around) ----
+
+    @Benchmark
+    public void multilineOhai(Blackhole bh) {
+        ohaiMultiline.findAll(Haystacks.SHERLOCK_EN).forEach(bh::consume);
+    }
+
+    @Benchmark
+    public void multilineJdk(Blackhole bh) {
+        Matcher m = jdkMultiline.matcher(Haystacks.SHERLOCK_EN);
+        while (m.find()) {
+            bh.consume(m.start());
+        }
+    }
+
+    // ---- Loop unrolling stress: ZQZQZQZQ (literal miss, self-transitions) ----
+
+    @Benchmark
+    public void literalMissOhai(Blackhole bh) {
+        ohaiLiteralMiss.findAll(Haystacks.SHERLOCK_EN).forEach(bh::consume);
+    }
+
+    @Benchmark
+    public void literalMissJdk(Blackhole bh) {
+        Matcher m = jdkLiteralMiss.matcher(Haystacks.SHERLOCK_EN);
         while (m.find()) {
             bh.consume(m.start());
         }
