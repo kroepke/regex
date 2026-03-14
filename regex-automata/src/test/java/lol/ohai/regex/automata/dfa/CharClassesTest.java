@@ -215,6 +215,30 @@ class CharClassesTest {
         System.out.println("Merged stride: " + merged.stride());
     }
 
+    @Test
+    void reverseDfaForUnicodeWordMergeStatus() throws Exception {
+        // The reverse NFA for \w+ has 1,205 states with 440 distinct merged
+        // signatures — more than 256, so the merge falls back to buildUnmerged
+        // with quit-on-non-ASCII. This is because the reverse NFA compiler
+        // creates CharRange states with many different .next() targets (unlike
+        // the forward NFA where they all share the same loop-back state).
+        //
+        // TODO: Investigate why the reverse NFA has more distinct signatures
+        // than the forward NFA, and whether the reverse NFA compiler can be
+        // modified to produce fewer distinct targets.
+        var ast = Parser.parse("\\w+", 250);
+        var hir = Translator.translate("\\w+", ast);
+        var revNfa = Compiler.compileReverse(hir);
+
+        CharClasses revCc = CharClassBuilder.build(revNfa, false);
+        assertNotNull(revCc, "build should succeed for reverse \\w+");
+        // Currently: 440 merged signatures > 256 → falls back to quit
+        // When fixed: should have no quit classes
+        System.out.println("Reverse NFA stateCount: " + revNfa.stateCount());
+        System.out.println("Reverse char classes: " + revCc.classCount());
+        System.out.println("Reverse hasQuit: " + revCc.hasQuitClasses());
+    }
+
     // --- Helpers ---
 
     private static NFA compileNfa(String pattern) throws Exception {
