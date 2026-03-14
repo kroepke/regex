@@ -100,11 +100,37 @@ public final class LazyDFA {
         int lastMatchEnd = -1;
 
         while (pos < end) {
+            // Inner unrolled loop: process 4 transitions per iteration.
+            // The guard (pos + 3 < end) ensures all 4 haystack accesses are in bounds.
+            // Only cached, non-special transitions (nextSid > quit) stay in the inner loop.
+            // Any special state (match, UNKNOWN, dead, quit) breaks out to the outer loop.
+            while (pos + 3 < end) {
+                int s0 = cache.nextState(sid, charClasses.classify(haystack[pos]));
+                if (s0 <= quit) { break; }
+
+                int s1 = cache.nextState(s0, charClasses.classify(haystack[pos + 1]));
+                if (s1 <= quit) { sid = s0; pos++; cache.charsSearched++; break; }
+
+                int s2 = cache.nextState(s1, charClasses.classify(haystack[pos + 2]));
+                if (s2 <= quit) { sid = s1; pos += 2; cache.charsSearched += 2; break; }
+
+                int s3 = cache.nextState(s2, charClasses.classify(haystack[pos + 3]));
+                if (s3 <= quit) { sid = s2; pos += 3; cache.charsSearched += 3; break; }
+
+                sid = s3;
+                pos += 4;
+                cache.charsSearched += 4;
+                continue;
+            }
+
+            // Outer dispatch: handle the char at pos (either a break-out from the inner
+            // loop or a tail char when fewer than 4 remain). Re-classify and dispatch.
+            if (pos >= end) break;
+
             int classId = charClasses.classify(haystack[pos]);
             int nextSid = cache.nextState(sid, classId);
 
             if (nextSid > quit) {
-                // Fast path: normal cached transition, non-special, non-match
                 sid = nextSid;
                 pos++;
                 cache.charsSearched++;
@@ -112,9 +138,6 @@ public final class LazyDFA {
             }
 
             if (nextSid < 0) {
-                // Match state (high bit set). With 1-char delay, the match
-                // ended at 'pos' (the char we just consumed triggered the
-                // delayed match notification). Record pos as the exclusive end.
                 lastMatchEnd = pos;
                 sid = nextSid & 0x7FFF_FFFF;
                 pos++;
@@ -137,9 +160,6 @@ public final class LazyDFA {
                 continue;
             }
             if (nextSid == dead) {
-                // Dead state: no further progress possible.
-                // Set sid = dead so the right-edge transition is skipped
-                // (it should only fire on non-dead states).
                 sid = dead;
                 break;
             }
