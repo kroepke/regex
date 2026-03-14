@@ -90,7 +90,7 @@ class CharClassesTest {
         Ast ast = Parser.parse("\\b", 250);
         Hir hir = Translator.translate("\\b", ast);
         NFA nfa = Compiler.compile(hir);
-        CharClasses cc = CharClassBuilder.build(nfa, true); // true = quitNonAscii
+        CharClasses cc = CharClassBuilder.buildUnmerged(nfa, true); // true = quitNonAscii
 
         // ASCII chars should NOT be quit classes
         assertFalse(cc.isQuitClass(cc.classify('a')));

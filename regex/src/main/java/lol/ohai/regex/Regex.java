@@ -91,7 +91,7 @@ public final class Regex {
             } else {
                 NFA nfa = Compiler.compile(hir);
                 boolean quitNonAscii = nfa.lookSetAny().containsUnicodeWord();
-                CharClasses charClasses = CharClassBuilder.build(nfa, quitNonAscii);
+                CharClasses charClasses = CharClassBuilder.buildUnmerged(nfa, quitNonAscii);
                 PikeVM pikeVM = new PikeVM(nfa);
                 LazyDFA forwardDFA = charClasses != null
                         ? LazyDFA.create(nfa, charClasses) : null;
@@ -99,7 +99,7 @@ public final class Regex {
                 LazyDFA reverseDFA = null;
                 if (forwardDFA != null) {
                     NFA reverseNfa = Compiler.compileReverse(hir);
-                    CharClasses reverseCharClasses = CharClassBuilder.build(reverseNfa, quitNonAscii);
+                    CharClasses reverseCharClasses = CharClassBuilder.buildUnmerged(reverseNfa, quitNonAscii);
                     reverseDFA = reverseCharClasses != null
                             ? LazyDFA.create(reverseNfa, reverseCharClasses) : null;
                 }
@@ -133,7 +133,7 @@ public final class Regex {
                         if (innerPrefilter != null && innerPrefilter.matchLength() >= 3) {
                             try {
                                 NFA prefixRevNfa = Compiler.compileReverse(innerLiteral.prefixHir());
-                                CharClasses prefixRevCc = CharClassBuilder.build(prefixRevNfa, quitNonAscii);
+                                CharClasses prefixRevCc = CharClassBuilder.buildUnmerged(prefixRevNfa, quitNonAscii);
                                 LazyDFA prefixReverseDFA = prefixRevCc != null
                                         ? LazyDFA.create(prefixRevNfa, prefixRevCc) : null;
                                 if (prefixReverseDFA != null) {

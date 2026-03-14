@@ -34,13 +34,13 @@ class ReverseSuffixTest {
 
             NFA nfa = Compiler.compile(hir);
             boolean quitNonAscii = nfa.lookSetAny().containsUnicodeWord();
-            CharClasses cc = CharClassBuilder.build(nfa, quitNonAscii);
+            CharClasses cc = CharClassBuilder.buildUnmerged(nfa, quitNonAscii);
             PikeVM pikeVM = new PikeVM(nfa);
             LazyDFA forwardDFA = cc != null ? LazyDFA.create(nfa, cc) : null;
             assertNotNull(forwardDFA, "pattern must support forward DFA");
 
             NFA reverseNfa = Compiler.compileReverse(hir);
-            CharClasses revCc = CharClassBuilder.build(reverseNfa, quitNonAscii);
+            CharClasses revCc = CharClassBuilder.buildUnmerged(reverseNfa, quitNonAscii);
             LazyDFA reverseDFA = revCc != null ? LazyDFA.create(reverseNfa, revCc) : null;
             assertNotNull(reverseDFA, "pattern must support reverse DFA");
 

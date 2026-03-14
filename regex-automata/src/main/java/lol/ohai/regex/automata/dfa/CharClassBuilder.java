@@ -11,7 +11,7 @@ public final class CharClassBuilder {
     private CharClassBuilder() {}
 
     public static CharClasses build(NFA nfa) {
-        return build(nfa, false);
+        return buildUnmerged(nfa, false);
     }
 
     /**
@@ -27,7 +27,8 @@ public final class CharClassBuilder {
      * where the 256-class limit is inherent
      * (upstream/regex/regex-automata/src/util/alphabet.rs).</p>
      */
-    public static CharClasses build(NFA nfa, boolean quitNonAscii) {
+    // Renamed from build(NFA, boolean). Kept for A/B benchmarking.
+    public static CharClasses buildUnmerged(NFA nfa, boolean quitNonAscii) {
         TreeSet<Integer> boundaries = collectBoundaries(nfa, quitNonAscii);
 
         if (boundaries.size() - 1 > 256 && !quitNonAscii) {

@@ -327,7 +327,7 @@ class LazyDFATest {
             Hir hir = Translator.translate(pattern, ast);
             NFA nfa = Compiler.compile(hir);
             boolean quitNonAscii = nfa.lookSetAny().containsUnicodeWord();
-            CharClasses cc = CharClassBuilder.build(nfa, quitNonAscii);
+            CharClasses cc = CharClassBuilder.buildUnmerged(nfa, quitNonAscii);
             return LazyDFA.create(nfa, cc);
         } catch (Exception e) {
             throw new RuntimeException("Failed to compile: " + pattern, e);

@@ -36,14 +36,14 @@ class ReverseInnerTest {
 
             NFA nfa = Compiler.compile(hir);
             boolean quitNonAscii = nfa.lookSetAny().containsUnicodeWord();
-            CharClasses cc = CharClassBuilder.build(nfa, quitNonAscii);
+            CharClasses cc = CharClassBuilder.buildUnmerged(nfa, quitNonAscii);
             PikeVM pikeVM = new PikeVM(nfa);
             LazyDFA forwardDFA = cc != null ? LazyDFA.create(nfa, cc) : null;
             assertNotNull(forwardDFA, "pattern must support forward DFA");
 
             // Compile separate prefix-only reverse DFA
             NFA prefixRevNfa = Compiler.compileReverse(inner.prefixHir());
-            CharClasses prefixRevCc = CharClassBuilder.build(prefixRevNfa, quitNonAscii);
+            CharClasses prefixRevCc = CharClassBuilder.buildUnmerged(prefixRevNfa, quitNonAscii);
             LazyDFA prefixReverseDFA = prefixRevCc != null
                     ? LazyDFA.create(prefixRevNfa, prefixRevCc) : null;
             assertNotNull(prefixReverseDFA, "prefix reverse DFA must be available");
