@@ -223,6 +223,29 @@ public final class LazyDFA {
 
         int pos = end - 1;
         while (pos >= start) {
+            // Inner unrolled loop: process 4 transitions per iteration (reverse).
+            while (pos >= start + 3) {
+                int s0 = cache.nextState(sid, charClasses.classify(haystack[pos]));
+                if (s0 <= quit) { break; }
+
+                int s1 = cache.nextState(s0, charClasses.classify(haystack[pos - 1]));
+                if (s1 <= quit) { sid = s0; pos--; cache.charsSearched++; break; }
+
+                int s2 = cache.nextState(s1, charClasses.classify(haystack[pos - 2]));
+                if (s2 <= quit) { sid = s1; pos -= 2; cache.charsSearched += 2; break; }
+
+                int s3 = cache.nextState(s2, charClasses.classify(haystack[pos - 3]));
+                if (s3 <= quit) { sid = s2; pos -= 3; cache.charsSearched += 3; break; }
+
+                sid = s3;
+                pos -= 4;
+                cache.charsSearched += 4;
+                continue;
+            }
+
+            // Outer dispatch: handle break-out or tail chars.
+            if (pos < start) break;
+
             int classId = charClasses.classify(haystack[pos]);
             int nextSid = cache.nextState(sid, classId);
 
