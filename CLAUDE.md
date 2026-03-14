@@ -103,6 +103,19 @@ The project uses Maven with a wrapper script (`./mvnw`). Always use the wrapper 
 - The upstream's test data in `upstream/regex/testdata/` contains comprehensive test cases — use these
 - Thread safety via thread-local pools for engine scratch space, matching upstream's approach
 
+### Stage Tagging
+
+Tag sensible stopping points with `stage-N-description` tags. A stage is a commit where a coherent feature is complete, all tests pass, and benchmarks can be meaningfully compared. See `docs/architecture/stage-progression.md` for the full history.
+
+**When to tag:** After completing a feature that changes search paths, adds an engine, or modifies strategy selection — any change that could affect benchmark results. The tag goes on the final commit of the feature (after all fixes and doc updates).
+
+**How to tag:**
+```bash
+git tag stage-N-short-description <commit-hash>
+git push --tags
+```
+Then add an entry to `docs/architecture/stage-progression.md` describing: what changed, which engines/strategies are active, test count, and key benchmark numbers.
+
 ## Architecture Gaps
 
 Features intentionally deferred from initial implementations. **Check these before adding new engines or optimizations** — the gap may already be documented with design notes. Ignoring these has caused correctness bugs and performance regressions.
