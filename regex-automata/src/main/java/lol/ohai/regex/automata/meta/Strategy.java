@@ -337,14 +337,14 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                 SearchResult revResult = reverseDFA.searchRev(reverseInput, cache.reverseDFACache());
 
                 switch (revResult) {
-                    case SearchResult.NoMatch _ -> {
+                    case SearchResult.NoMatch n -> {
                         start = suffixPos + 1;
                         continue;
                     }
-                    case SearchResult.GaveUp _ -> {
+                    case SearchResult.GaveUp g -> {
                         return pikeVM.isMatch(input.withBounds(start, end, false), cache.pikeVMCache());
                     }
-                    case SearchResult.Match _ -> {
+                    case SearchResult.Match m -> {
                         return true;
                     }
                 }
@@ -371,11 +371,11 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                 SearchResult revResult = reverseDFA.searchRev(reverseInput, cache.reverseDFACache());
 
                 switch (revResult) {
-                    case SearchResult.NoMatch _ -> {
+                    case SearchResult.NoMatch n -> {
                         start = suffixPos + 1;
                         continue;
                     }
-                    case SearchResult.GaveUp _ -> {
+                    case SearchResult.GaveUp g -> {
                         return pikeVM.search(input.withBounds(start, end, false), cache.pikeVMCache());
                     }
                     case SearchResult.Match m -> {
@@ -390,11 +390,11 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                                 Input narrowed = input.withBounds(minStart, fm.offset(), false);
                                 return pikeVM.search(narrowed, cache.pikeVMCache());
                             }
-                            case SearchResult.GaveUp _ -> {
+                            case SearchResult.GaveUp g2 -> {
                                 return pikeVM.search(
                                         input.withBounds(minStart, end, false), cache.pikeVMCache());
                             }
-                            case SearchResult.NoMatch _ -> {
+                            case SearchResult.NoMatch n2 -> {
                                 start = suffixPos + 1;
                                 continue;
                             }
@@ -424,11 +424,11 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                 SearchResult revResult = reverseDFA.searchRev(reverseInput, cache.reverseDFACache());
 
                 switch (revResult) {
-                    case SearchResult.NoMatch _ -> {
+                    case SearchResult.NoMatch n -> {
                         start = suffixPos + 1;
                         continue;
                     }
-                    case SearchResult.GaveUp _ -> {
+                    case SearchResult.GaveUp g -> {
                         return pikeVM.searchCaptures(input.withBounds(start, end, false), cache.pikeVMCache());
                     }
                     case SearchResult.Match m -> {
@@ -443,11 +443,11 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                                 Input narrowed = input.withBounds(minStart, fm.offset(), false);
                                 return Strategy.doCaptureEngine(narrowed, cache, pikeVM, backtracker);
                             }
-                            case SearchResult.GaveUp _ -> {
+                            case SearchResult.GaveUp g2 -> {
                                 return pikeVM.searchCaptures(
                                         input.withBounds(minStart, end, false), cache.pikeVMCache());
                             }
-                            case SearchResult.NoMatch _ -> {
+                            case SearchResult.NoMatch n2 -> {
                                 start = suffixPos + 1;
                                 continue;
                             }
@@ -499,16 +499,16 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                 SearchResult revResult = prefixReverseDFA.searchRev(reverseInput, cache.prefixReverseDFACache());
 
                 switch (revResult) {
-                    case SearchResult.NoMatch _ -> {
+                    case SearchResult.NoMatch n -> {
                         minStart = innerPos;
                         minPreStart = innerPos + 1;
                         start = innerPos + 1;
                         continue;
                     }
-                    case SearchResult.GaveUp _ -> {
+                    case SearchResult.GaveUp g -> {
                         return pikeVM.isMatch(input.withBounds(start, end, false), cache.pikeVMCache());
                     }
-                    case SearchResult.Match _ -> {
+                    case SearchResult.Match m -> {
                         return true;
                     }
                 }
@@ -540,16 +540,16 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                 SearchResult revResult = prefixReverseDFA.searchRev(reverseInput, cache.prefixReverseDFACache());
 
                 switch (revResult) {
-                    case SearchResult.NoMatch _ -> {
+                    case SearchResult.NoMatch n -> {
                         minStart = innerPos;
                         minPreStart = innerPos + 1;
                         start = innerPos + 1;
                         continue;
                     }
-                    case SearchResult.GaveUp _ -> {
+                    case SearchResult.GaveUp g -> {
                         return pikeVM.search(input.withBounds(start, end, false), cache.pikeVMCache());
                     }
-                    case SearchResult.Match _ -> {
+                    case SearchResult.Match m -> {
                         // Use minStart (not matchStart) so PikeVM finds the true
                         // leftmost match — the prefix reverse DFA may overshoot rightward.
                         Input fwdInput = input.withBounds(minStart, end, false);
@@ -560,10 +560,10 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                                 Input narrowed = input.withBounds(minStart, fm.offset(), false);
                                 return pikeVM.search(narrowed, cache.pikeVMCache());
                             }
-                            case SearchResult.GaveUp _ -> {
+                            case SearchResult.GaveUp g2 -> {
                                 return pikeVM.search(fwdInput, cache.pikeVMCache());
                             }
-                            case SearchResult.NoMatch _ -> {
+                            case SearchResult.NoMatch n2 -> {
                                 start = innerPos + 1;
                                 continue;
                             }
@@ -598,16 +598,16 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                 SearchResult revResult = prefixReverseDFA.searchRev(reverseInput, cache.prefixReverseDFACache());
 
                 switch (revResult) {
-                    case SearchResult.NoMatch _ -> {
+                    case SearchResult.NoMatch n -> {
                         minStart = innerPos;
                         minPreStart = innerPos + 1;
                         start = innerPos + 1;
                         continue;
                     }
-                    case SearchResult.GaveUp _ -> {
+                    case SearchResult.GaveUp g -> {
                         return pikeVM.searchCaptures(input.withBounds(start, end, false), cache.pikeVMCache());
                     }
-                    case SearchResult.Match _ -> {
+                    case SearchResult.Match m -> {
                         // Use minStart (not matchStart) for same reason as search()
                         Input fwdInput = input.withBounds(minStart, end, false);
                         SearchResult fwdResult = forwardDFA.searchFwd(fwdInput, cache.forwardDFACache());
@@ -617,10 +617,10 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                                 Input narrowed = input.withBounds(minStart, fm.offset(), false);
                                 return Strategy.doCaptureEngine(narrowed, cache, pikeVM, backtracker);
                             }
-                            case SearchResult.GaveUp _ -> {
+                            case SearchResult.GaveUp g2 -> {
                                 return pikeVM.searchCaptures(fwdInput, cache.pikeVMCache());
                             }
-                            case SearchResult.NoMatch _ -> {
+                            case SearchResult.NoMatch n2 -> {
                                 start = innerPos + 1;
                                 continue;
                             }
