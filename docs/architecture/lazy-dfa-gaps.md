@@ -62,6 +62,24 @@ Both `searchFwd()` and `searchRev()` now use 4× loop unrolling. An inner loop p
 
 **Design spec:** `docs/superpowers/specs/2026-03-14-lazy-dfa-loop-unrolling-design.md`
 
+## Hot Path Optimizations — Implemented
+
+**Status: DONE** (2026-03-15)
+
+Three optimizations to the DFA search hot path, targeting per-char and per-match overhead:
+
+1. **ASCII fast-path for `classify()`**: A flat `byte[128]` lookup table for ASCII characters, reducing per-char cost from 2 array loads to 1 for ASCII-dominant haystacks. Measured 23% improvement on the forward DFA.
+
+2. **Local `charsSearched` counter**: The per-char `cache.charsSearched++` field write moved to a local variable, with write-back before `computeNextState` calls (where `shouldGiveUp` reads it) and at method exit.
+
+3. **Primitive-encoded search results**: `searchFwdLong()`/`searchRevLong()` return `long` instead of `SearchResult` records, eliminating ~350K record allocations per high-match-count search. `Strategy.Core` updated; `ReverseSuffix`/`ReverseInner` still use record-returning methods.
+
+4. **Pooled `Captures`**: `DFACache.scratchCaptures()` provides a reusable `Captures(1)` instance for non-capture searches, eliminating 174K allocations per search. Allocation dropped from 25.5 MB/op to 13.0 MB/op on charClass.
+
+**Combined result:** charClass improved from 70 → 91 ops/s (+30%), gap vs JDK narrowed from 4.1x to 3.2x.
+
+**Design spec:** `docs/superpowers/plans/2026-03-15-dfa-hot-path-optimizations.md`
+
 ## Look-Around Encoding in DFA States — Implemented
 
 **Status: DONE** (2026-03-11)
