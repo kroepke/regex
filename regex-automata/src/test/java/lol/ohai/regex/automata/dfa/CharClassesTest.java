@@ -239,6 +239,18 @@ class CharClassesTest {
         System.out.println("Reverse hasQuit: " + revCc.hasQuitClasses());
     }
 
+    @Test
+    void classifyAsciiMatchesTwoLevel() throws Exception {
+        for (String pattern : List.of("[a-zA-Z0-9]+", "\\w+", "[^x]", "a|b|c")) {
+            var nfa = compileNfa(pattern);
+            var cc = CharClassBuilder.build(nfa);
+            for (int c = 0; c < 128; c++) {
+                assertEquals(cc.classifyTwoLevel((char) c), cc.classify((char) c),
+                        "ASCII fast-path mismatch for pattern '" + pattern + "' at char " + c);
+            }
+        }
+    }
+
     // --- Helpers ---
 
     private static NFA compileNfa(String pattern) throws Exception {

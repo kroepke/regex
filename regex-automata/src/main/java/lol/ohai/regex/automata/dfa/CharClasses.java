@@ -10,6 +10,7 @@ public final class CharClasses {
     private final boolean[] lineLF;     // true if class representative is \n
     private final boolean[] lineCR;     // true if class representative is \r
     private final boolean[] quitClass;  // indexed by class ID, true if class should trigger DFA quit
+    private final byte[] asciiTable;    // flat lookup for c < 128
 
     CharClasses(byte[][] rows, int[] highIndex, int classCount,
                 boolean[] wordClass, boolean[] lineLF, boolean[] lineCR,
@@ -24,9 +25,19 @@ public final class CharClasses {
         this.lineLF = lineLF;
         this.lineCR = lineCR;
         this.quitClass = quitClass;
+        this.asciiTable = new byte[128];
+        for (int c = 0; c < 128; c++) {
+            asciiTable[c] = rows[highIndex[0]][c];
+        }
     }
 
     public int classify(char c) {
+        if (c < 128) return asciiTable[c] & 0xFF;
+        return rows[highIndex[c >>> 8]][c & 0xFF] & 0xFF;
+    }
+
+    /** Two-level classify, bypassing ASCII fast-path. Package-private for testing. */
+    int classifyTwoLevel(char c) {
         return rows[highIndex[c >>> 8]][c & 0xFF] & 0xFF;
     }
 
