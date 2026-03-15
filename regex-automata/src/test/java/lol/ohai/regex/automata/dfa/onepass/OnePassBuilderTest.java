@@ -80,6 +80,7 @@ class OnePassBuilderTest {
         assertNotNull(dfa, "'\\d+' should be one-pass");
     }
 
+
     @Test
     void simpleLiteralWithCapture() {
         OnePassDFA dfa = buildOnePass("(a+)b");
