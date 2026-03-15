@@ -3,6 +3,8 @@ package lol.ohai.regex.automata.meta;
 import lol.ohai.regex.automata.dfa.lazy.DFACache;
 import lol.ohai.regex.automata.dfa.lazy.LazyDFA;
 import lol.ohai.regex.automata.dfa.lazy.SearchResult;
+import lol.ohai.regex.automata.dfa.onepass.OnePassCache;
+import lol.ohai.regex.automata.dfa.onepass.OnePassDFA;
 import lol.ohai.regex.automata.nfa.thompson.backtrack.BoundedBacktracker;
 import lol.ohai.regex.automata.nfa.thompson.pikevm.PikeVM;
 import lol.ohai.regex.automata.util.Captures;
@@ -40,7 +42,8 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
      * @param backtracker the bounded backtracker, or {@code null} if not available
      */
     record Core(PikeVM pikeVM, LazyDFA forwardDFA, LazyDFA reverseDFA,
-                Prefilter prefilter, BoundedBacktracker backtracker) implements Strategy {
+                Prefilter prefilter, BoundedBacktracker backtracker,
+                OnePassDFA onePassDFA) implements Strategy {
 
         @Override
         public Cache createCache() {
@@ -49,7 +52,8 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                     forwardDFA != null ? forwardDFA.createCache() : null,
                     reverseDFA != null ? reverseDFA.createCache() : null,
                     backtracker != null ? backtracker.createCache() : null,
-                    null  // prefixReverseDFACache — not used by Core
+                    null,  // prefixReverseDFACache — not used by Core
+                    onePassDFA != null ? onePassDFA.createCache() : null
             );
         }
 
@@ -200,7 +204,9 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
             Input revInput = input.withBounds(input.start(), matchEnd, true);
             long revResult = reverseDFA.searchRevLong(revInput, cache.reverseDFACache());
             if (SearchResult.isMatch(revResult)) {
-                Input narrowed = input.withBounds(SearchResult.matchOffset(revResult), matchEnd, false);
+                // Window precisely narrowed by forward+reverse DFA — anchored=true
+                // so that captureEngine can use the one-pass DFA.
+                Input narrowed = input.withBounds(SearchResult.matchOffset(revResult), matchEnd, true);
                 return captureEngine(narrowed, cache);
             }
             if (SearchResult.isGaveUp(revResult)) {
@@ -214,11 +220,34 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
 
         /**
          * Selects the best capture engine for the given narrowed, anchored window.
-         * Prefers the bounded backtracker for small windows (faster than PikeVM for
-         * captures); falls back to PikeVM for larger windows or when the backtracker
-         * is unavailable.
+         * Prefers one-pass DFA (single scan with captures) when available, then
+         * bounded backtracker for small windows, then PikeVM as fallback.
+         */
+        /**
+         * Selects the best capture engine for the given narrowed window.
+         * Prefers one-pass DFA when the window is precisely narrowed (anchored),
+         * then bounded backtracker for small windows, then PikeVM as fallback.
+         *
+         * <p>The one-pass DFA only runs on anchored inputs where the window
+         * boundaries are exactly the match boundaries (from three-phase DFA
+         * narrowing). Non-anchored inputs may contain a shorter leftmost match
+         * within the window, which the one-pass DFA can't find (it always
+         * matches from position 0 of the window).</p>
          */
         private Captures captureEngine(Input narrowed, Cache cache) {
+            // Only use one-pass DFA when input is anchored — meaning the
+            // forward+reverse DFA precisely narrowed the window to the match.
+            if (narrowed.isAnchored()
+                    && onePassDFA != null && cache.onePassCache() != null) {
+                int groupCount = onePassDFA.groupCount();
+                int[] slots = new int[groupCount * 2];
+                int pid = onePassDFA.search(narrowed, cache.onePassCache(), slots);
+                if (pid >= 0) {
+                    Captures caps = new Captures(groupCount);
+                    System.arraycopy(slots, 0, caps.slots(), 0, slots.length);
+                    return caps;
+                }
+            }
             return Strategy.doCaptureEngine(narrowed, cache, pikeVM, backtracker);
         }
 
@@ -291,7 +320,8 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                     forwardDFA.createCache(),
                     reverseDFA.createCache(),
                     backtracker != null ? backtracker.createCache() : null,
-                    null  // prefixReverseDFACache — not used by ReverseSuffix
+                    null,  // prefixReverseDFACache — not used by ReverseSuffix
+                    null   // onePassCache — not used by ReverseSuffix
             );
         }
 
@@ -446,7 +476,8 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                     forwardDFA.createCache(),
                     null,  // reverseDFACache — not used by ReverseInner
                     backtracker != null ? backtracker.createCache() : null,
-                    prefixReverseDFA.createCache()  // prefix-only reverse DFA
+                    prefixReverseDFA.createCache(),  // prefix-only reverse DFA
+                    null   // onePassCache — not used by ReverseInner
             );
         }
 
@@ -636,8 +667,9 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
             DFACache forwardDFACache,
             DFACache reverseDFACache,
             lol.ohai.regex.automata.nfa.thompson.backtrack.BoundedBacktracker.Cache backtrackerCache,
-            DFACache prefixReverseDFACache
+            DFACache prefixReverseDFACache,
+            OnePassCache onePassCache
     ) {
-        static final Cache EMPTY = new Cache(null, null, null, null, null);
+        static final Cache EMPTY = new Cache(null, null, null, null, null, null);
     }
 }

@@ -7,4 +7,5 @@ module lol.ohai.regex.automata {
     exports lol.ohai.regex.automata.util;
     exports lol.ohai.regex.automata.dfa;
     exports lol.ohai.regex.automata.dfa.lazy;
+    exports lol.ohai.regex.automata.dfa.onepass;
 }

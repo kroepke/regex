@@ -7,6 +7,8 @@ import lol.ohai.regex.automata.meta.Strategy;
 import lol.ohai.regex.automata.dfa.CharClassBuilder;
 import lol.ohai.regex.automata.dfa.CharClasses;
 import lol.ohai.regex.automata.dfa.lazy.LazyDFA;
+import lol.ohai.regex.automata.dfa.onepass.OnePassBuilder;
+import lol.ohai.regex.automata.dfa.onepass.OnePassDFA;
 import lol.ohai.regex.automata.nfa.thompson.BuildError;
 import lol.ohai.regex.automata.nfa.thompson.Compiler;
 import lol.ohai.regex.automata.nfa.thompson.NFA;
@@ -106,6 +108,12 @@ public final class Regex {
 
                 BoundedBacktracker backtracker = new BoundedBacktracker(nfa);
 
+                // Build one-pass DFA for patterns with explicit captures
+                OnePassDFA onePassDFA = null;
+                if (hirHasCaptures(hir) && charClasses != null) {
+                    onePassDFA = OnePassBuilder.build(nfa, charClasses);
+                }
+
                 // Try ReverseSuffix: no prefix prefilter, but suffix available + both DFAs
                 if (prefilter == null && forwardDFA != null && reverseDFA != null) {
                     LiteralSeq suffixes = LiteralExtractor.extractSuffixes(hir);
@@ -149,7 +157,7 @@ public final class Regex {
                     }
                 }
 
-                strategy = new Strategy.Core(pikeVM, forwardDFA, reverseDFA, prefilter, backtracker);
+                strategy = new Strategy.Core(pikeVM, forwardDFA, reverseDFA, prefilter, backtracker, onePassDFA);
                 namedGroups = buildNamedGroupMap(nfa);
             }
 
