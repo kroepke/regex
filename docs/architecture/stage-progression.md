@@ -109,18 +109,45 @@ Added a specialized one-pass DFA that extracts capture groups in a single forwar
 - Key win: captures **33.8× faster** (366 → 12,362 ops/s), now **1.0× JDK** (was 43× slower)
 - Other benchmarks unchanged (one-pass DFA only affects capture path)
 
+### stage-10-allocation-cleanup (`87ced70`)
+**Allocation elimination + collection modernization + metadata consolidation**
+
+Comprehensive codebase cleanup targeting three zones: search hot-path allocations, compilation-path efficiency, and code quality. Guided by a systematic audit of `System.arraycopy` usage, unused parameters, wasteful allocations, and Collections-vs-arrays patterns.
+
+Search hot-path changes:
+- `Match` converted from record to final class with lazy `text()` — substring computed on demand, not at match creation. `source` field nulled after first `text()` call to allow GC. `equals`/`hashCode` based on offsets only (matching upstream Rust).
+- `Input.setBounds()` for in-place mutation — `Searcher.find()` and `BaseFindIterator.advance()` reuse a single `Input` instead of allocating via `withBounds()` per match.
+- `CharClasses` metadata consolidated: four `boolean[]` arrays → single `byte[] classFlags` with bit constants. Eliminates null checks on DFA state computation path. ASCII table init loop replaced with `System.arraycopy`.
+- `Captures` internal storage changed from `List<Optional<Match>>` to `Match[]` — `Optional.ofNullable()` wrapping deferred to accessor.
+
+Compilation-path changes:
+- `CharClassBuilder.collectBoundaries()` returns `int[]` instead of `TreeSet<Integer>` — eliminates all `Integer` boxing and red-black tree overhead.
+- `computeSignatureLong()` fast path for NFAs with ≤62 states — `long` bitmask instead of `BitSet` allocation per region.
+- 64KB `flatMap` staging buffer eliminated — rows computed directly via binary search on sorted boundaries.
+- `Collections.unmodifiableList/Map` → `List.copyOf`/`Map.copyOf`.
+
+Code quality:
+- `OnePassBuilder.grow()`/`growLong()` → `Arrays.copyOf`
+- `PrefilterOnly` unused `cache` parameter documented
+
+- Engines: PikeVM + forward/reverse lazy DFA + bounded backtracker + one-pass DFA
+- Strategies: Core (three-phase DFA + one-pass capture engine), PrefilterOnly, ReverseSuffix, ReverseInner
+- Tests: 2,186 total (3 new CharClasses tests), 879/879 upstream, 0 failures
+- Key wins vs S9 (same-session measurement): captures **+18%** (14,330 → 16,928), unicodeWord **+12%** (13,650 → 15,267), charClass **+12%** (73 → 81), multiline **+16%** (201 → 233)
+- vs JDK: captures now **1.1x faster** than JDK (was 1.0x), literal **1.55x faster**, literalMiss **2.0x faster**, wordRepeat **8.4x faster**
+
 ## Benchmark Comparison (same machine, 2026-03-15)
 
-| Benchmark | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 |
-|---|---|---|---|---|---|---|---|---|---|
-| literal (ops/s) | 14 | 4,746 | 4,225 | 4,491 | 4,380 | 4,663 | 4,543 | 4,569 | 3,326 |
-| charClass | 0.06 | 9.5 | 11.0 | 69.5 | 11.6 | 70.6 | 75.1 | **76.1** | 60.9 |
-| alternation | 6.5 | 44.8 | 44.3 | 44.4 | 43.1 | 45.0 | 45.0 | 44.4 | 39.0 |
-| captures | 60 | 58.8 | 58.7 | 452 | 110.6 | 350 | 356 | 366 | **12,362** |
-| unicodeWord | 13 | 12.9 | 12.6 | 15,717 | 12.3 | 18.3 | **13,499** | **13,945** | 11,291 |
-| multiline | — | — | — | — | — | — | — | 211 | 192 |
-| literalMiss | — | — | — | — | — | — | — | 4,964 | 3,982 |
-| wordRepeat | — | — | — | — | — | — | — | 94,535 | 85,364 |
+| Benchmark | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | **S10** | JDK |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| literal (ops/s) | 14 | 4,746 | 4,225 | 4,491 | 4,380 | 4,663 | 4,543 | 4,569 | 3,326 | **4,787** | 3,088 |
+| charClass | 0.06 | 9.5 | 11.0 | 69.5 | 11.6 | 70.6 | 75.1 | 76.1 | 60.9 | **81.4** | 288 |
+| alternation | 6.5 | 44.8 | 44.3 | 44.4 | 43.1 | 45.0 | 45.0 | 44.4 | 39.0 | **44.1** | 101 |
+| captures | 60 | 58.8 | 58.7 | 452 | 110.6 | 350 | 356 | 366 | 12,362 | **16,928** | 15,186 |
+| unicodeWord | 13 | 12.9 | 12.6 | 15,717 | 12.3 | 18.3 | 13,499 | 13,945 | 11,291 | **15,267** | 31,830 |
+| multiline | — | — | — | — | — | — | — | 211 | 192 | **233** | 1,005 |
+| literalMiss | — | — | — | — | — | — | — | 4,964 | 3,982 | **5,107** | 2,541 |
+| wordRepeat | — | — | — | — | — | — | — | 94,535 | 85,364 | **93,662** | 11,171 |
 
 Notes:
 - S4 unicodeWord (15,717) was based on three-phase with DFA edge bugs (27 test failures). S7 unicodeWord (13,499) is fully correct.
@@ -128,3 +155,4 @@ Notes:
 - S7 unicodeWord improvement is from equivalence class merging + surrogate-pair resolution, enabling the DFA to handle full Unicode without quit fallback.
 - S8 SearchBenchmark charClass improvement is modest (75→76) because the high-level API still allocates Match+substring per match. The raw engine benchmark (RawEngineBenchmark) shows the true engine improvement: 70 → 91 ops/s (+30%). The profiling component test shows the three-phase core improved from 13,890 µs to 10,968 µs (-21%).
 - S9 captures improvement is from the one-pass DFA replacing PikeVM on the narrowed capture window. Non-capture benchmarks show variance from single-fork JMH runs (not regressions — re-running produces numbers consistent with S8).
+- S10 same-session comparison (Phase 1 baseline→post) is the reliable measurement: captures +18%, unicodeWord +12%, charClass +12%, multiline +16%. The S9→S10 deltas appear larger due to single-fork JMH variance across different runs.
