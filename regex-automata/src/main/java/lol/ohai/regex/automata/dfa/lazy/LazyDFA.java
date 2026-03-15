@@ -86,6 +86,21 @@ public final class LazyDFA {
      * @return Match(endPos), NoMatch, or GaveUp(offset)
      */
     public SearchResult searchFwd(Input input, DFACache cache) {
+        long result = searchFwdLong(input, cache);
+        if (SearchResult.isMatch(result)) return new SearchResult.Match(SearchResult.matchOffset(result));
+        if (SearchResult.isNoMatch(result)) return new SearchResult.NoMatch();
+        return new SearchResult.GaveUp(SearchResult.gaveUpOffset(result));
+    }
+
+    /**
+     * Forward search returning a primitive-encoded result to avoid allocation.
+     * Use {@link SearchResult} static helpers to decode the return value.
+     *
+     * @see SearchResult#isMatch(long)
+     * @see SearchResult#isNoMatch(long)
+     * @see SearchResult#isGaveUp(long)
+     */
+    public long searchFwdLong(Input input, DFACache cache) {
         char[] haystack = input.haystack();
         int pos = input.start();
         int end = input.end();
@@ -94,8 +109,8 @@ public final class LazyDFA {
         int quit = DFACache.quit(stride);
 
         int sid = getOrComputeStartState(input, cache);
-        if (sid == dead) return new SearchResult.NoMatch();
-        if (sid == quit) return new SearchResult.GaveUp(pos);
+        if (sid == dead) return SearchResult.NO_MATCH;
+        if (sid == quit) return SearchResult.gaveUp(pos);
 
         int lastMatchEnd = -1;
         long charsSearched = cache.charsSearched;
@@ -151,7 +166,7 @@ public final class LazyDFA {
                 cache.charsSearched = charsSearched;
                 nextSid = computeNextState(cache, sid, classId, haystack[pos]);
                 if (nextSid == quit) {
-                    return new SearchResult.GaveUp(pos);
+                    return SearchResult.gaveUp(pos);
                 }
                 cache.setTransition(sid, classId, nextSid);
                 sid = nextSid;
@@ -169,7 +184,7 @@ public final class LazyDFA {
             }
             // nextSid == quit
             cache.charsSearched = charsSearched;
-            return new SearchResult.GaveUp(pos);
+            return SearchResult.gaveUp(pos);
         }
 
         // Right-edge transition for forward search. When the search span
@@ -184,7 +199,7 @@ public final class LazyDFA {
             if (end < haystack.length) {
                 int classId = charClasses.classify(haystack[end]);
                 if (charClasses.hasQuitClasses() && charClasses.isQuitClass(classId)) {
-                    return new SearchResult.GaveUp(end);
+                    return SearchResult.gaveUp(end);
                 }
                 rightEdgeSid = computeNextState(cache, rawSid, classId, haystack[end]);
             } else {
@@ -197,8 +212,8 @@ public final class LazyDFA {
             cache.charsSearched = charsSearched;
         }
 
-        if (lastMatchEnd >= 0) return new SearchResult.Match(lastMatchEnd);
-        return new SearchResult.NoMatch();
+        if (lastMatchEnd >= 0) return SearchResult.match(lastMatchEnd);
+        return SearchResult.NO_MATCH;
     }
 
     /**
@@ -216,6 +231,21 @@ public final class LazyDFA {
      * @return Match(startPos), NoMatch, or GaveUp(offset)
      */
     public SearchResult searchRev(Input input, DFACache cache) {
+        long result = searchRevLong(input, cache);
+        if (SearchResult.isMatch(result)) return new SearchResult.Match(SearchResult.matchOffset(result));
+        if (SearchResult.isNoMatch(result)) return new SearchResult.NoMatch();
+        return new SearchResult.GaveUp(SearchResult.gaveUpOffset(result));
+    }
+
+    /**
+     * Reverse search returning a primitive-encoded result to avoid allocation.
+     * Use {@link SearchResult} static helpers to decode the return value.
+     *
+     * @see SearchResult#isMatch(long)
+     * @see SearchResult#isNoMatch(long)
+     * @see SearchResult#isGaveUp(long)
+     */
+    public long searchRevLong(Input input, DFACache cache) {
         char[] haystack = input.haystack();
         int start = input.start();
         int end = input.end();
@@ -224,8 +254,8 @@ public final class LazyDFA {
         int quit = DFACache.quit(stride);
 
         int sid = getOrComputeStartState(input, cache);
-        if (sid == dead) return new SearchResult.NoMatch();
-        if (sid == quit) return new SearchResult.GaveUp(end);
+        if (sid == dead) return SearchResult.NO_MATCH;
+        if (sid == quit) return SearchResult.gaveUp(end);
 
         int lastMatchStart = -1;
         long charsSearched = cache.charsSearched;
@@ -277,7 +307,7 @@ public final class LazyDFA {
                 cache.charsSearched = charsSearched;
                 nextSid = computeNextState(cache, sid, classId, haystack[pos]);
                 if (nextSid == quit) {
-                    return new SearchResult.GaveUp(pos);
+                    return SearchResult.gaveUp(pos);
                 }
                 cache.setTransition(sid, classId, nextSid);
                 sid = nextSid;
@@ -294,7 +324,7 @@ public final class LazyDFA {
                 break;
             }
             cache.charsSearched = charsSearched;
-            return new SearchResult.GaveUp(pos);
+            return SearchResult.gaveUp(pos);
         }
 
         // Left-edge transition for reverse search. When the search span
@@ -309,8 +339,7 @@ public final class LazyDFA {
             if (start > 0) {
                 int classId = charClasses.classify(haystack[start - 1]);
                 if (charClasses.hasQuitClasses() && charClasses.isQuitClass(classId)) {
-                    // Char before span is a quit char — give up
-                    return new SearchResult.GaveUp(start);
+                    return SearchResult.gaveUp(start);
                 }
                 leftEdgeSid = computeNextState(cache, rawSid, classId, haystack[start - 1]);
             } else {
@@ -323,8 +352,8 @@ public final class LazyDFA {
             cache.charsSearched = charsSearched;
         }
 
-        if (lastMatchStart >= 0) return new SearchResult.Match(lastMatchStart);
-        return new SearchResult.NoMatch();
+        if (lastMatchStart >= 0) return SearchResult.match(lastMatchStart);
+        return SearchResult.NO_MATCH;
     }
 
     // -- Internal: start state --

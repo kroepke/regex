@@ -59,12 +59,10 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                 return isMatchPrefilter(input, cache);
             }
             if (forwardDFA != null) {
-                SearchResult result = forwardDFA.searchFwd(input, cache.forwardDFACache());
-                return switch (result) {
-                    case SearchResult.Match m -> true;
-                    case SearchResult.NoMatch n -> false;
-                    case SearchResult.GaveUp g -> pikeVM.isMatch(input, cache.pikeVMCache());
-                };
+                long result = forwardDFA.searchFwdLong(input, cache.forwardDFACache());
+                if (SearchResult.isMatch(result)) return true;
+                if (SearchResult.isNoMatch(result)) return false;
+                return pikeVM.isMatch(input, cache.pikeVMCache());
             }
             return pikeVM.isMatch(input, cache.pikeVMCache());
         }
@@ -81,16 +79,13 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                 }
                 Input candidateInput = input.withBounds(pos, end, false);
                 if (forwardDFA != null) {
-                    SearchResult r = forwardDFA.searchFwd(candidateInput, cache.forwardDFACache());
-                    switch (r) {
-                        case SearchResult.Match m -> { return true; }
-                        case SearchResult.NoMatch n -> { start = pos + 1; continue; }
-                        case SearchResult.GaveUp g -> {
-                            if (pikeVM.isMatch(candidateInput, cache.pikeVMCache())) return true;
-                            start = pos + 1;
-                            continue;
-                        }
-                    }
+                    long r = forwardDFA.searchFwdLong(candidateInput, cache.forwardDFACache());
+                    if (SearchResult.isMatch(r)) { return true; }
+                    if (SearchResult.isNoMatch(r)) { start = pos + 1; continue; }
+                    // GaveUp
+                    if (pikeVM.isMatch(candidateInput, cache.pikeVMCache())) return true;
+                    start = pos + 1;
+                    continue;
                 } else {
                     if (pikeVM.isMatch(candidateInput, cache.pikeVMCache())) {
                         return true;
@@ -143,51 +138,44 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
          * up (e.g., Unicode word boundaries with quit chars).</p>
          */
         private Captures dfaSearch(Input input, Cache cache) {
-            SearchResult fwdResult = forwardDFA.searchFwd(input, cache.forwardDFACache());
-            return switch (fwdResult) {
-                case SearchResult.NoMatch n -> null;
-                case SearchResult.GaveUp g -> pikeVM.search(input, cache.pikeVMCache());
-                case SearchResult.Match m -> {
-                    int matchEnd = m.offset();
-                    if (matchEnd == input.start()) {
-                        // Empty match
-                        Captures caps = new Captures(1);
-                        caps.set(0, matchEnd);
-                        caps.set(1, matchEnd);
-                        yield caps;
-                    }
-                    if (input.isAnchored()) {
-                        Captures caps = new Captures(1);
-                        caps.set(0, input.start());
-                        caps.set(1, matchEnd);
-                        yield caps;
-                    }
-                    if (reverseDFA == null) {
-                        Input narrowed = input.withBounds(input.start(), matchEnd, false);
-                        yield pikeVM.search(narrowed, cache.pikeVMCache());
-                    }
-                    // Three-phase: reverse DFA finds match start
-                    Input revInput = input.withBounds(input.start(), matchEnd, true);
-                    SearchResult revResult = reverseDFA.searchRev(revInput, cache.reverseDFACache());
-                    yield switch (revResult) {
-                        case SearchResult.Match rm -> {
-                            Captures caps = new Captures(1);
-                            caps.set(0, rm.offset());
-                            caps.set(1, matchEnd);
-                            yield caps;
-                        }
-                        case SearchResult.GaveUp g2 -> {
-                            Input narrowed = input.withBounds(input.start(), matchEnd, false);
-                            yield pikeVM.search(narrowed, cache.pikeVMCache());
-                        }
-                        case SearchResult.NoMatch n2 -> {
-                            // Should not happen — fall back to PikeVM
-                            Input narrowed = input.withBounds(input.start(), matchEnd, false);
-                            yield pikeVM.search(narrowed, cache.pikeVMCache());
-                        }
-                    };
-                }
-            };
+            long fwdResult = forwardDFA.searchFwdLong(input, cache.forwardDFACache());
+            if (SearchResult.isNoMatch(fwdResult)) return null;
+            if (SearchResult.isGaveUp(fwdResult)) return pikeVM.search(input, cache.pikeVMCache());
+
+            int matchEnd = SearchResult.matchOffset(fwdResult);
+            if (matchEnd == input.start()) {
+                // Empty match
+                Captures caps = new Captures(1);
+                caps.set(0, matchEnd);
+                caps.set(1, matchEnd);
+                return caps;
+            }
+            if (input.isAnchored()) {
+                Captures caps = new Captures(1);
+                caps.set(0, input.start());
+                caps.set(1, matchEnd);
+                return caps;
+            }
+            if (reverseDFA == null) {
+                Input narrowed = input.withBounds(input.start(), matchEnd, false);
+                return pikeVM.search(narrowed, cache.pikeVMCache());
+            }
+            // Three-phase: reverse DFA finds match start
+            Input revInput = input.withBounds(input.start(), matchEnd, true);
+            long revResult = reverseDFA.searchRevLong(revInput, cache.reverseDFACache());
+            if (SearchResult.isMatch(revResult)) {
+                Captures caps = new Captures(1);
+                caps.set(0, SearchResult.matchOffset(revResult));
+                caps.set(1, matchEnd);
+                return caps;
+            }
+            if (SearchResult.isGaveUp(revResult)) {
+                Input narrowed = input.withBounds(input.start(), matchEnd, false);
+                return pikeVM.search(narrowed, cache.pikeVMCache());
+            }
+            // NoMatch — should not happen, fall back
+            Input narrowed = input.withBounds(input.start(), matchEnd, false);
+            return pikeVM.search(narrowed, cache.pikeVMCache());
         }
 
         /**
@@ -195,39 +183,33 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
          * narrows the window, capture engine runs on the narrow window.
          */
         private Captures dfaSearchCaptures(Input input, Cache cache) {
-            SearchResult fwdResult = forwardDFA.searchFwd(input, cache.forwardDFACache());
-            return switch (fwdResult) {
-                case SearchResult.NoMatch n -> null;
-                case SearchResult.GaveUp g -> pikeVM.searchCaptures(input, cache.pikeVMCache());
-                case SearchResult.Match m -> {
-                    int matchEnd = m.offset();
-                    if (matchEnd == input.start() || input.isAnchored()) {
-                        Input narrowed = input.withBounds(input.start(), matchEnd, false);
-                        yield captureEngine(narrowed, cache);
-                    }
-                    if (reverseDFA == null) {
-                        Input narrowed = input.withBounds(input.start(), matchEnd, false);
-                        yield captureEngine(narrowed, cache);
-                    }
-                    // Three-phase: reverse DFA narrows window for capture engine
-                    Input revInput = input.withBounds(input.start(), matchEnd, true);
-                    SearchResult revResult = reverseDFA.searchRev(revInput, cache.reverseDFACache());
-                    yield switch (revResult) {
-                        case SearchResult.Match rm -> {
-                            Input narrowed = input.withBounds(rm.offset(), matchEnd, false);
-                            yield captureEngine(narrowed, cache);
-                        }
-                        case SearchResult.GaveUp g2 -> {
-                            Input narrowed = input.withBounds(input.start(), matchEnd, false);
-                            yield pikeVM.searchCaptures(narrowed, cache.pikeVMCache());
-                        }
-                        case SearchResult.NoMatch n2 -> {
-                            Input narrowed = input.withBounds(input.start(), matchEnd, false);
-                            yield captureEngine(narrowed, cache);
-                        }
-                    };
-                }
-            };
+            long fwdResult = forwardDFA.searchFwdLong(input, cache.forwardDFACache());
+            if (SearchResult.isNoMatch(fwdResult)) return null;
+            if (SearchResult.isGaveUp(fwdResult)) return pikeVM.searchCaptures(input, cache.pikeVMCache());
+
+            int matchEnd = SearchResult.matchOffset(fwdResult);
+            if (matchEnd == input.start() || input.isAnchored()) {
+                Input narrowed = input.withBounds(input.start(), matchEnd, false);
+                return captureEngine(narrowed, cache);
+            }
+            if (reverseDFA == null) {
+                Input narrowed = input.withBounds(input.start(), matchEnd, false);
+                return captureEngine(narrowed, cache);
+            }
+            // Three-phase: reverse DFA narrows window for capture engine
+            Input revInput = input.withBounds(input.start(), matchEnd, true);
+            long revResult = reverseDFA.searchRevLong(revInput, cache.reverseDFACache());
+            if (SearchResult.isMatch(revResult)) {
+                Input narrowed = input.withBounds(SearchResult.matchOffset(revResult), matchEnd, false);
+                return captureEngine(narrowed, cache);
+            }
+            if (SearchResult.isGaveUp(revResult)) {
+                Input narrowed = input.withBounds(input.start(), matchEnd, false);
+                return pikeVM.searchCaptures(narrowed, cache.pikeVMCache());
+            }
+            // NoMatch — should not happen, fall back
+            Input narrowed = input.withBounds(input.start(), matchEnd, false);
+            return captureEngine(narrowed, cache);
         }
 
         /**
