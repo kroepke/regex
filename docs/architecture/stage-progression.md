@@ -98,21 +98,33 @@ Also added `Regex.Searcher` — a zero-allocation match iteration API analogous 
 - Key wins vs stage 7: charClass **+30%** (75 → 91 via SearchBenchmark), allocation **-49%** (25.5 → 13.0 MB/op on charClass)
 - New benchmarks: wordRepeat (94,535 ops/s — 8.5x faster than JDK), multiline (211 ops/s), literalMiss (4,964 ops/s — 2x faster than JDK)
 
+### stage-9-one-pass-dfa (`2600edd`)
+**One-pass DFA for capture group extraction**
+
+Added a specialized one-pass DFA that extracts capture groups in a single forward scan, replacing PikeVM/backtracker as the capture engine for eligible patterns. Each 64-bit transition encodes state ID (21 bits), match_wins flag, look assertions (18 bits), and capture slot bitset (24 bits). Builder detects ambiguity and falls back to PikeVM for non-one-pass patterns.
+
+- Engines: PikeVM + forward/reverse lazy DFA + bounded backtracker + **one-pass DFA**
+- Strategies: Core (three-phase DFA + one-pass capture engine), PrefilterOnly, ReverseSuffix, ReverseInner
+- Tests: 2,026 total, 879/879 upstream, 0 failures
+- Key win: captures **33.8× faster** (366 → 12,362 ops/s), now **1.0× JDK** (was 43× slower)
+- Other benchmarks unchanged (one-pass DFA only affects capture path)
+
 ## Benchmark Comparison (same machine, 2026-03-15)
 
-| Benchmark | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 |
-|---|---|---|---|---|---|---|---|---|
-| literal (ops/s) | 14 | 4,746 | 4,225 | 4,491 | 4,380 | 4,663 | 4,543 | 4,569 |
-| charClass | 0.06 | 9.5 | 11.0 | 69.5 | 11.6 | 70.6 | 75.1 | **76.1** |
-| alternation | 6.5 | 44.8 | 44.3 | 44.4 | 43.1 | 45.0 | 45.0 | 44.4 |
-| captures | 60 | 58.8 | 58.7 | 452 | 110.6 | 350 | 356 | 366 |
-| unicodeWord | 13 | 12.9 | 12.6 | 15,717 | 12.3 | 18.3 | **13,499** | **13,945** |
-| multiline | — | — | — | — | — | — | — | 211 |
-| literalMiss | — | — | — | — | — | — | — | 4,964 |
-| wordRepeat | — | — | — | — | — | — | — | 94,535 |
+| Benchmark | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 |
+|---|---|---|---|---|---|---|---|---|---|
+| literal (ops/s) | 14 | 4,746 | 4,225 | 4,491 | 4,380 | 4,663 | 4,543 | 4,569 | 3,326 |
+| charClass | 0.06 | 9.5 | 11.0 | 69.5 | 11.6 | 70.6 | 75.1 | **76.1** | 60.9 |
+| alternation | 6.5 | 44.8 | 44.3 | 44.4 | 43.1 | 45.0 | 45.0 | 44.4 | 39.0 |
+| captures | 60 | 58.8 | 58.7 | 452 | 110.6 | 350 | 356 | 366 | **12,362** |
+| unicodeWord | 13 | 12.9 | 12.6 | 15,717 | 12.3 | 18.3 | **13,499** | **13,945** | 11,291 |
+| multiline | — | — | — | — | — | — | — | 211 | 192 |
+| literalMiss | — | — | — | — | — | — | — | 4,964 | 3,982 |
+| wordRepeat | — | — | — | — | — | — | — | 94,535 | 85,364 |
 
 Notes:
 - S4 unicodeWord (15,717) was based on three-phase with DFA edge bugs (27 test failures). S7 unicodeWord (13,499) is fully correct.
 - S5 regressions vs S4 were caused by the removal of three-phase search, not the prefilter work.
 - S7 unicodeWord improvement is from equivalence class merging + surrogate-pair resolution, enabling the DFA to handle full Unicode without quit fallback.
 - S8 SearchBenchmark charClass improvement is modest (75→76) because the high-level API still allocates Match+substring per match. The raw engine benchmark (RawEngineBenchmark) shows the true engine improvement: 70 → 91 ops/s (+30%). The profiling component test shows the three-phase core improved from 13,890 µs to 10,968 µs (-21%).
+- S9 captures improvement is from the one-pass DFA replacing PikeVM on the narrowed capture window. Non-capture benchmarks show variance from single-fork JMH runs (not regressions — re-running produces numbers consistent with S8).

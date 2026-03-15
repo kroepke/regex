@@ -26,6 +26,22 @@ Our DFA already implements leftmost-first semantics correctly via the `break`-on
 
 See `docs/architecture/dfa-match-semantics-gap.md` for full analysis.
 
+## One-Pass DFA — Implemented
+
+**Status: DONE** (2026-03-15)
+
+A specialized DFA that extracts capture groups in a single forward scan, replacing PikeVM/backtracker as the capture engine for eligible patterns. Each 64-bit transition encodes the next state ID (21 bits), a match_wins flag, look-around assertions (18 bits), and a capture slot bitset (24 bits, up to 12 explicit groups).
+
+**Eligibility:** Patterns where at most one NFA thread is active at any point. Common capture patterns like `(\d{4})-(\d{2})-(\d{2})`, `([a-z]+)@([a-z]+)`, `(a|b)c` are one-pass. Ambiguous patterns like `(a*)(a*)` fall back to PikeVM.
+
+**Integration:** Used in `Strategy.Core.captureEngine()` on the precisely-narrowed (anchored) window from three-phase DFA search. Falls back to PikeVM/backtracker for non-one-pass patterns or non-anchored windows.
+
+**Result:** captures benchmark improved from 366 → 12,362 ops/s (33.8×), reaching JDK parity.
+
+**UTF-16 adaptations vs upstream:** Surrogate chars (0xD800-0xDFFF) skipped in transition compilation. `matchWins` bit excluded from conflict comparison to avoid false positives from Union path ordering.
+
+**Design spec:** `docs/superpowers/specs/2026-03-15-one-pass-dfa-design.md`
+
 ## Overlapping Match Mode
 
 **What:** Find all matches including those that overlap with each other.
