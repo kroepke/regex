@@ -146,8 +146,9 @@ class RegexTest {
 
     @Test
     void matchLength() {
-        Match m = new Match(3, 7, "test");
+        Match m = new Match(3, 7, "___test_");
         assertEquals(4, m.length());
+        assertEquals("test", m.text());
     }
 
     @Test
@@ -190,5 +191,32 @@ class RegexTest {
         assertEquals("b", matches.get(1).text());
         assertEquals("a", matches.get(2).text());
         assertEquals("b", matches.get(3).text());
+    }
+
+    @Test
+    void matchTextIsLazy() {
+        Regex re = Regex.compile("\\d+");
+        Match m = re.find("abc123def").orElseThrow();
+        assertEquals(3, m.start());
+        assertEquals(6, m.end());
+        assertEquals("123", m.text());
+        assertEquals(3, m.length());
+    }
+
+    @Test
+    void matchEquality() {
+        Regex re = Regex.compile("\\d+");
+        Match m1 = re.find("abc123def").orElseThrow();
+        Match m2 = re.find("abc123def").orElseThrow();
+        assertEquals(m1, m2);
+        assertEquals(m1.hashCode(), m2.hashCode());
+    }
+
+    @Test
+    void matchToString() {
+        Regex re = Regex.compile("\\d+");
+        Match m = re.find("abc123def").orElseThrow();
+        String s = m.toString();
+        assertTrue(s.contains("3") && s.contains("6"), "toString should include start and end");
     }
 }

@@ -366,7 +366,7 @@ public final class Regex {
                           lol.ohai.regex.automata.util.Captures caps, int group) {
         int start = caps.start(group);
         int end = caps.end(group);
-        return new Match(start, end, text.subSequence(start, end).toString());
+        return new Match(start, end, text);
     }
 
     private Captures toCaptures(CharSequence text,
