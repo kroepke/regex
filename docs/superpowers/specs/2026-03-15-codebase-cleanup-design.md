@@ -48,7 +48,7 @@ Changes that affect per-match or per-character operations during search. Measure
 - `start()` and `end()` remain zero-cost.
 - `Regex.toMatch()` passes the original `CharSequence` instead of eagerly substringifying.
 
-**Public API impact:** `Match` is no longer a record. Callers using `match.text()`, `match.start()`, `match.end()` are unaffected. Record destructuring (`match instanceof Match(int s, int e, String t)`) would break — acceptable for this young API.
+**Public API impact:** `Match` is no longer a record. Callers using `match.text()`, `match.start()`, `match.end()` are unaffected. Record destructuring (`match instanceof Match(int s, int e, String t)`) would break — acceptable for this young API. Must implement `equals()`/`hashCode()` explicitly (value-based on start/end/text) since record auto-generation is lost.
 
 **Expected effect:** Eliminates O(n) String allocations in `findAll()` loops for callers that only inspect offsets.
 
@@ -143,6 +143,8 @@ Changes that affect `Regex.compile()` time. Measured by `CompileBenchmark`.
 - For the merged path (`build()`): use `regionClassMap` + binary search on `sortedBounds` to find the class for each char.
 - For the unmerged path (`buildUnmerged()`): binary search on `sortedBounds` directly.
 - Write into the 256-byte row and feed it into the existing dedup logic.
+
+**Note:** The replacement involves binary search per row (256 lookups × 256 rows). For patterns with very many boundaries, benchmark against the flat-fill approach — keep the flat path as a fallback if binary search is slower for large boundary counts.
 
 **Expected effect:** Removes one 64KB allocation per `Regex.compile()`.
 
