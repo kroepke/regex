@@ -1,7 +1,6 @@
 package lol.ohai.regex.automata.dfa.lazy;
 
 import lol.ohai.regex.automata.dfa.CharClasses;
-import lol.ohai.regex.automata.meta.Prefilter;
 import lol.ohai.regex.automata.nfa.thompson.NFA;
 import lol.ohai.regex.automata.nfa.thompson.State;
 import lol.ohai.regex.automata.nfa.thompson.Transition;
@@ -43,15 +42,11 @@ public final class LazyDFA {
     private final NFA nfa;
     private final CharClasses charClasses;
     private final LookSet lookSetAny;
-    private final Prefilter prefilter;     // nullable
-    private final boolean universalStart;  // true if no prefix look-around
 
-    private LazyDFA(NFA nfa, CharClasses charClasses, Prefilter prefilter) {
+    private LazyDFA(NFA nfa, CharClasses charClasses) {
         this.nfa = nfa;
         this.charClasses = charClasses;
         this.lookSetAny = nfa.lookSetAny();
-        this.prefilter = prefilter;
-        this.universalStart = nfa.lookSetAny().isEmpty();
     }
 
     /**
@@ -60,10 +55,6 @@ public final class LazyDFA {
      * Unicode word boundaries, CRLF-aware line anchors).
      */
     public static LazyDFA create(NFA nfa, CharClasses charClasses) {
-        return create(nfa, charClasses, null);
-    }
-
-    public static LazyDFA create(NFA nfa, CharClasses charClasses, Prefilter prefilter) {
         LookSet looks = nfa.lookSetAny();
         // CRLF line anchors always bail — DFA can't handle them
         if (looks.containsCrlf()) {
@@ -75,7 +66,7 @@ public final class LazyDFA {
         if (looks.containsUnicodeWord() && !charClasses.hasQuitClasses()) {
             return null;
         }
-        return new LazyDFA(nfa, charClasses, prefilter);
+        return new LazyDFA(nfa, charClasses);
     }
 
     /** Creates a per-search cache. */
@@ -120,6 +111,7 @@ public final class LazyDFA {
         int sid = getOrComputeStartState(input, cache);
         if (sid == dead) return SearchResult.NO_MATCH;
         if (sid == quit) return SearchResult.gaveUp(pos);
+
         int lastMatchEnd = -1;
         long charsSearched = cache.charsSearched;
 
