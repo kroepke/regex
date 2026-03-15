@@ -251,6 +251,36 @@ class CharClassesTest {
         }
     }
 
+    @Test
+    void wordClassFlagsPreserved() throws Exception {
+        NFA nfa = compileNfa("\\w+");
+        CharClasses cc = CharClassBuilder.build(nfa);
+        assertNotNull(cc);
+        assertTrue(cc.isWordClass(cc.classify('a')));
+        assertFalse(cc.isWordClass(cc.classify(' ')));
+    }
+
+    @Test
+    void lineFeedFlagsPreserved() throws Exception {
+        NFA nfa = compileNfa("(?m)^test$");
+        CharClasses cc = CharClassBuilder.build(nfa);
+        assertNotNull(cc);
+        assertTrue(cc.isLineLF(cc.classify('\n')));
+        assertFalse(cc.isLineLF(cc.classify('a')));
+        assertTrue(cc.isLineCR(cc.classify('\r')));
+        assertFalse(cc.isLineCR(cc.classify('a')));
+    }
+
+    @Test
+    void identityHasNoFlags() {
+        CharClasses cc = CharClasses.identity();
+        assertFalse(cc.isWordClass(0));
+        assertFalse(cc.isLineLF(0));
+        assertFalse(cc.isLineCR(0));
+        assertFalse(cc.isQuitClass(0));
+        assertFalse(cc.hasQuitClasses());
+    }
+
     // --- Helpers ---
 
     private static NFA compileNfa(String pattern) throws Exception {

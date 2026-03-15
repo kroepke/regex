@@ -99,21 +99,18 @@ public final class CharClassBuilder {
             }
         }
 
-        boolean[] wordClass = new boolean[classCount];
-        boolean[] lineLF = new boolean[classCount];
-        boolean[] lineCR = new boolean[classCount];
+        byte[] classFlags = new byte[classCount];
         for (int cls = 0; cls < classCount; cls++) {
             int rep = classRep[cls];
             if (rep >= 0 && rep < 65536) {
                 char c = (char) rep;
-                wordClass[cls] = isWordChar(c);
-                lineLF[cls] = (c == '\n');
-                lineCR[cls] = (c == '\r');
+                if (isWordChar(c))  classFlags[cls] |= CharClasses.FLAG_WORD;
+                if (c == '\n')      classFlags[cls] |= CharClasses.FLAG_LF;
+                if (c == '\r')      classFlags[cls] |= CharClasses.FLAG_CR;
             }
         }
 
-        return new CharClasses(uniqueRows.toArray(byte[][]::new), highIndex, classCount,
-                wordClass, lineLF, lineCR, null);
+        return new CharClasses(uniqueRows.toArray(byte[][]::new), highIndex, classCount, classFlags);
     }
 
     /**
@@ -226,32 +223,26 @@ public final class CharClassBuilder {
             }
         }
 
-        boolean[] wordClass = new boolean[classCount];
-        boolean[] lineLF = new boolean[classCount];
-        boolean[] lineCR = new boolean[classCount];
+        byte[] classFlags = new byte[classCount];
         for (int cls = 0; cls < classCount && cls < sortedBounds.length - 1; cls++) {
-            int representative = sortedBounds[cls]; // first char in this class
+            int representative = sortedBounds[cls];
             if (representative < 65536) {
                 char c = (char) representative;
-                wordClass[cls] = isWordChar(c);
-                lineLF[cls] = (c == '\n');
-                lineCR[cls] = (c == '\r');
+                if (isWordChar(c))  classFlags[cls] |= CharClasses.FLAG_WORD;
+                if (c == '\n')      classFlags[cls] |= CharClasses.FLAG_LF;
+                if (c == '\r')      classFlags[cls] |= CharClasses.FLAG_CR;
             }
         }
-
-        boolean[] quitClassArr = null;
         if (quitNonAscii) {
-            quitClassArr = new boolean[classCount];
             for (int cls = 0; cls < classCount && cls < sortedBounds.length - 1; cls++) {
                 int representative = sortedBounds[cls];
                 if (representative >= 128 && representative < 65536) {
-                    quitClassArr[cls] = true;
+                    classFlags[cls] |= CharClasses.FLAG_QUIT;
                 }
             }
         }
 
-        return new CharClasses(uniqueRows.toArray(byte[][]::new), highIndex, classCount,
-                wordClass, lineLF, lineCR, quitClassArr);
+        return new CharClasses(uniqueRows.toArray(byte[][]::new), highIndex, classCount, classFlags);
     }
 
     /**

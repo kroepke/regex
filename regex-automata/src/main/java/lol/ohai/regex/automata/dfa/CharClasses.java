@@ -1,34 +1,35 @@
 package lol.ohai.regex.automata.dfa;
 
 public final class CharClasses {
+    static final byte FLAG_WORD = 1;
+    static final byte FLAG_LF   = 2;
+    static final byte FLAG_CR   = 4;
+    static final byte FLAG_QUIT = 8;
+
     private final byte[][] rows;
     private final int[] highIndex;
     private final int classCount;
     private final int stride;
     private final int strideShift;
-    private final boolean[] wordClass;  // indexed by class ID, true if class representative is word char
-    private final boolean[] lineLF;     // true if class representative is \n
-    private final boolean[] lineCR;     // true if class representative is \r
-    private final boolean[] quitClass;  // indexed by class ID, true if class should trigger DFA quit
+    private final byte[] classFlags;    // indexed by class ID, bit flags
+    private final boolean hasQuitClasses;
     private final byte[] asciiTable;    // flat lookup for c < 128
 
-    CharClasses(byte[][] rows, int[] highIndex, int classCount,
-                boolean[] wordClass, boolean[] lineLF, boolean[] lineCR,
-                boolean[] quitClass) {
+    CharClasses(byte[][] rows, int[] highIndex, int classCount, byte[] classFlags) {
         this.rows = rows;
         this.highIndex = highIndex;
         this.classCount = classCount;
         int alphabetSize = classCount + 1; // +1 for EOI
         this.stride = Integer.highestOneBit(alphabetSize - 1) << 1;
         this.strideShift = Integer.numberOfTrailingZeros(this.stride);
-        this.wordClass = wordClass;
-        this.lineLF = lineLF;
-        this.lineCR = lineCR;
-        this.quitClass = quitClass;
-        this.asciiTable = new byte[128];
-        for (int c = 0; c < 128; c++) {
-            asciiTable[c] = rows[highIndex[0]][c];
+        this.classFlags = classFlags;
+        boolean anyQuit = false;
+        for (byte f : classFlags) {
+            if ((f & FLAG_QUIT) != 0) { anyQuit = true; break; }
         }
+        this.hasQuitClasses = anyQuit;
+        this.asciiTable = new byte[128];
+        System.arraycopy(rows[highIndex[0]], 0, asciiTable, 0, 128);
     }
 
     public int classify(char c) {
@@ -47,29 +48,29 @@ public final class CharClasses {
     public int strideShift() { return strideShift; }
 
     public boolean isWordClass(int classId) {
-        return wordClass != null && classId < wordClass.length && wordClass[classId];
+        return classId < classFlags.length && (classFlags[classId] & FLAG_WORD) != 0;
     }
 
     public boolean isLineLF(int classId) {
-        return lineLF != null && classId < lineLF.length && lineLF[classId];
+        return classId < classFlags.length && (classFlags[classId] & FLAG_LF) != 0;
     }
 
     public boolean isLineCR(int classId) {
-        return lineCR != null && classId < lineCR.length && lineCR[classId];
+        return classId < classFlags.length && (classFlags[classId] & FLAG_CR) != 0;
     }
 
     public boolean isQuitClass(int classId) {
-        return quitClass != null && classId < quitClass.length && quitClass[classId];
+        return classId < classFlags.length && (classFlags[classId] & FLAG_QUIT) != 0;
     }
 
     public boolean hasQuitClasses() {
-        return quitClass != null;
+        return hasQuitClasses;
     }
 
     public static CharClasses identity() {
         byte[] singleRow = new byte[256];
         byte[][] rows = { singleRow };
         int[] highIndex = new int[256];
-        return new CharClasses(rows, highIndex, 1, null, null, null, null);
+        return new CharClasses(rows, highIndex, 1, new byte[1]);
     }
 }
