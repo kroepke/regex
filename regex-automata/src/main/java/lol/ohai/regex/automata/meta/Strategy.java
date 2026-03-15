@@ -273,6 +273,7 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
         }
     }
 
+    // PrefilterOnly needs no engine cache — parameter required by Strategy interface contract.
     record PrefilterOnly(Prefilter prefilter) implements Strategy {
 
         @Override
