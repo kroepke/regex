@@ -372,20 +372,18 @@ public final class Regex {
     private Captures toCaptures(CharSequence text,
                                 lol.ohai.regex.automata.util.Captures caps) {
         int groupCount = caps.groupCount();
-        List<Optional<Match>> groups = new ArrayList<>(groupCount);
+        Match[] groups = new Match[groupCount];
         Match overall = null;
         for (int i = 0; i < groupCount; i++) {
             if (caps.isMatched(i)) {
                 Match m = toMatch(text, caps, i);
-                groups.add(Optional.of(m));
+                groups[i] = m;
                 if (i == 0) {
                     overall = m;
                 }
-            } else {
-                groups.add(Optional.empty());
             }
         }
-        return new Captures(overall, List.copyOf(groups), namedGroups);
+        return new Captures(overall, groups, namedGroups);
     }
 
     private static Map<String, Integer> buildNamedGroupMap(NFA nfa) {

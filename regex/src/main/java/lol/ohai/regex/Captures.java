@@ -1,8 +1,5 @@
 package lol.ohai.regex;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -14,10 +11,10 @@ import java.util.Optional;
  */
 public final class Captures {
     private final Match overall;
-    private final List<Optional<Match>> groups;
+    private final Match[] groups;  // nulls for unmatched groups
     private final Map<String, Integer> namedGroups;
 
-    Captures(Match overall, List<Optional<Match>> groups, Map<String, Integer> namedGroups) {
+    Captures(Match overall, Match[] groups, Map<String, Integer> namedGroups) {
         this.overall = overall;
         this.groups = groups;
         this.namedGroups = namedGroups;
@@ -36,7 +33,7 @@ public final class Captures {
      * @throws IndexOutOfBoundsException if index is out of range
      */
     public Optional<Match> group(int index) {
-        return groups.get(index);
+        return Optional.ofNullable(groups[index]);
     }
 
     /**
@@ -51,12 +48,12 @@ public final class Captures {
         if (index == null) {
             throw new IllegalArgumentException("no group named: " + name);
         }
-        return groups.get(index);
+        return Optional.ofNullable(groups[index]);
     }
 
     /** Returns the number of capture groups (including group 0). */
     public int groupCount() {
-        return groups.size();
+        return groups.length;
     }
 
     /** Returns an unmodifiable map of group names to their indices. */
