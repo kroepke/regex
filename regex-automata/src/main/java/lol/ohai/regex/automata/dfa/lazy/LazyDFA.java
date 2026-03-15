@@ -98,6 +98,7 @@ public final class LazyDFA {
         if (sid == quit) return new SearchResult.GaveUp(pos);
 
         int lastMatchEnd = -1;
+        long charsSearched = cache.charsSearched;
 
         while (pos < end) {
             // Inner unrolled loop: process 4 transitions per iteration.
@@ -109,17 +110,17 @@ public final class LazyDFA {
                 if (s0 <= quit) { break; }
 
                 int s1 = cache.nextState(s0, charClasses.classify(haystack[pos + 1]));
-                if (s1 <= quit) { sid = s0; pos++; cache.charsSearched++; break; }
+                if (s1 <= quit) { sid = s0; pos++; charsSearched++; break; }
 
                 int s2 = cache.nextState(s1, charClasses.classify(haystack[pos + 2]));
-                if (s2 <= quit) { sid = s1; pos += 2; cache.charsSearched += 2; break; }
+                if (s2 <= quit) { sid = s1; pos += 2; charsSearched += 2; break; }
 
                 int s3 = cache.nextState(s2, charClasses.classify(haystack[pos + 3]));
-                if (s3 <= quit) { sid = s2; pos += 3; cache.charsSearched += 3; break; }
+                if (s3 <= quit) { sid = s2; pos += 3; charsSearched += 3; break; }
 
                 sid = s3;
                 pos += 4;
-                cache.charsSearched += 4;
+                charsSearched += 4;
                 continue;
             }
 
@@ -133,7 +134,7 @@ public final class LazyDFA {
             if (nextSid > quit) {
                 sid = nextSid;
                 pos++;
-                cache.charsSearched++;
+                charsSearched++;
                 continue;
             }
 
@@ -141,14 +142,17 @@ public final class LazyDFA {
                 lastMatchEnd = pos;
                 sid = nextSid & 0x7FFF_FFFF;
                 pos++;
-                cache.charsSearched++;
+                charsSearched++;
                 continue;
             }
 
             // Slow path: UNKNOWN, DEAD, or QUIT
             if (nextSid == DFACache.UNKNOWN) {
+                cache.charsSearched = charsSearched;
                 nextSid = computeNextState(cache, sid, classId, haystack[pos]);
-                if (nextSid == quit) return new SearchResult.GaveUp(pos);
+                if (nextSid == quit) {
+                    return new SearchResult.GaveUp(pos);
+                }
                 cache.setTransition(sid, classId, nextSid);
                 sid = nextSid;
                 if (sid < 0) {
@@ -156,7 +160,7 @@ public final class LazyDFA {
                     sid = sid & 0x7FFF_FFFF;
                 }
                 pos++;
-                cache.charsSearched++;
+                charsSearched++;
                 continue;
             }
             if (nextSid == dead) {
@@ -164,6 +168,7 @@ public final class LazyDFA {
                 break;
             }
             // nextSid == quit
+            cache.charsSearched = charsSearched;
             return new SearchResult.GaveUp(pos);
         }
 
@@ -175,6 +180,7 @@ public final class LazyDFA {
         int rawSid = sid & 0x7FFF_FFFF;
         if (rawSid != dead && rawSid != quit) {
             int rightEdgeSid;
+            cache.charsSearched = charsSearched;
             if (end < haystack.length) {
                 int classId = charClasses.classify(haystack[end]);
                 if (charClasses.hasQuitClasses() && charClasses.isQuitClass(classId)) {
@@ -187,6 +193,8 @@ public final class LazyDFA {
             if (rightEdgeSid < 0) {
                 lastMatchEnd = end;
             }
+        } else {
+            cache.charsSearched = charsSearched;
         }
 
         if (lastMatchEnd >= 0) return new SearchResult.Match(lastMatchEnd);
@@ -220,6 +228,7 @@ public final class LazyDFA {
         if (sid == quit) return new SearchResult.GaveUp(end);
 
         int lastMatchStart = -1;
+        long charsSearched = cache.charsSearched;
 
         int pos = end - 1;
         while (pos >= start) {
@@ -229,17 +238,17 @@ public final class LazyDFA {
                 if (s0 <= quit) { break; }
 
                 int s1 = cache.nextState(s0, charClasses.classify(haystack[pos - 1]));
-                if (s1 <= quit) { sid = s0; pos--; cache.charsSearched++; break; }
+                if (s1 <= quit) { sid = s0; pos--; charsSearched++; break; }
 
                 int s2 = cache.nextState(s1, charClasses.classify(haystack[pos - 2]));
-                if (s2 <= quit) { sid = s1; pos -= 2; cache.charsSearched += 2; break; }
+                if (s2 <= quit) { sid = s1; pos -= 2; charsSearched += 2; break; }
 
                 int s3 = cache.nextState(s2, charClasses.classify(haystack[pos - 3]));
-                if (s3 <= quit) { sid = s2; pos -= 3; cache.charsSearched += 3; break; }
+                if (s3 <= quit) { sid = s2; pos -= 3; charsSearched += 3; break; }
 
                 sid = s3;
                 pos -= 4;
-                cache.charsSearched += 4;
+                charsSearched += 4;
                 continue;
             }
 
@@ -252,7 +261,7 @@ public final class LazyDFA {
             if (nextSid > quit) {
                 sid = nextSid;
                 pos--;
-                cache.charsSearched++;
+                charsSearched++;
                 continue;
             }
 
@@ -260,13 +269,16 @@ public final class LazyDFA {
                 lastMatchStart = pos + 1;
                 sid = nextSid & 0x7FFF_FFFF;
                 pos--;
-                cache.charsSearched++;
+                charsSearched++;
                 continue;
             }
 
             if (nextSid == DFACache.UNKNOWN) {
+                cache.charsSearched = charsSearched;
                 nextSid = computeNextState(cache, sid, classId, haystack[pos]);
-                if (nextSid == quit) return new SearchResult.GaveUp(pos);
+                if (nextSid == quit) {
+                    return new SearchResult.GaveUp(pos);
+                }
                 cache.setTransition(sid, classId, nextSid);
                 sid = nextSid;
                 if (sid < 0) {
@@ -274,13 +286,14 @@ public final class LazyDFA {
                     sid = sid & 0x7FFF_FFFF;
                 }
                 pos--;
-                cache.charsSearched++;
+                charsSearched++;
                 continue;
             }
             if (nextSid == dead) {
                 sid = dead;
                 break;
             }
+            cache.charsSearched = charsSearched;
             return new SearchResult.GaveUp(pos);
         }
 
@@ -292,6 +305,7 @@ public final class LazyDFA {
         int rawSid = sid & 0x7FFF_FFFF;
         if (rawSid != dead && rawSid != quit) {
             int leftEdgeSid;
+            cache.charsSearched = charsSearched;
             if (start > 0) {
                 int classId = charClasses.classify(haystack[start - 1]);
                 if (charClasses.hasQuitClasses() && charClasses.isQuitClass(classId)) {
@@ -305,6 +319,8 @@ public final class LazyDFA {
             if (leftEdgeSid < 0) {
                 lastMatchStart = start;
             }
+        } else {
+            cache.charsSearched = charsSearched;
         }
 
         if (lastMatchStart >= 0) return new SearchResult.Match(lastMatchStart);
