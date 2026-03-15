@@ -1,6 +1,7 @@
 package lol.ohai.regex.automata.dfa.onepass;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import lol.ohai.regex.automata.dfa.CharClasses;
@@ -378,14 +379,10 @@ public final class OnePassBuilder {
     }
 
     private static int[] grow(int[] arr) {
-        int[] newArr = new int[arr.length * 2];
-        System.arraycopy(arr, 0, newArr, 0, arr.length);
-        return newArr;
+        return Arrays.copyOf(arr, arr.length * 2);
     }
 
     private static long[] growLong(long[] arr) {
-        long[] newArr = new long[arr.length * 2];
-        System.arraycopy(arr, 0, newArr, 0, arr.length);
-        return newArr;
+        return Arrays.copyOf(arr, arr.length * 2);
     }
 }
