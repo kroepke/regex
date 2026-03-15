@@ -38,19 +38,36 @@ public final class CharClassBuilder {
         int regionCount = sortedBounds.length - 1;
 
         // Merge: compute behavior signature per region, group by signature.
-        HashMap<BitSet, Integer> signatureToClass = new HashMap<>();
+        // For small NFAs (stateCount + 2 <= 64), use a long bitmask instead of
+        // a BitSet to avoid object allocation per region.
         int[] regionClassMap = new int[regionCount];
         int nextClassId = 0;
 
-        for (int r = 0; r < regionCount; r++) {
-            BitSet sig = computeSignature(nfa, sortedBounds[r]);
-            Integer existingClass = signatureToClass.get(sig);
-            if (existingClass != null) {
-                regionClassMap[r] = existingClass;
-            } else {
-                regionClassMap[r] = nextClassId;
-                signatureToClass.put(sig, nextClassId);
-                nextClassId++;
+        if (nfa.stateCount() + 2 <= 64) {
+            HashMap<Long, Integer> signatureToClass = new HashMap<>();
+            for (int r = 0; r < regionCount; r++) {
+                long sig = computeSignatureLong(nfa, sortedBounds[r]);
+                Integer existingClass = signatureToClass.get(sig);
+                if (existingClass != null) {
+                    regionClassMap[r] = existingClass;
+                } else {
+                    regionClassMap[r] = nextClassId;
+                    signatureToClass.put(sig, nextClassId);
+                    nextClassId++;
+                }
+            }
+        } else {
+            HashMap<BitSet, Integer> signatureToClass = new HashMap<>();
+            for (int r = 0; r < regionCount; r++) {
+                BitSet sig = computeSignature(nfa, sortedBounds[r]);
+                Integer existingClass = signatureToClass.get(sig);
+                if (existingClass != null) {
+                    regionClassMap[r] = existingClass;
+                } else {
+                    regionClassMap[r] = nextClassId;
+                    signatureToClass.put(sig, nextClassId);
+                    nextClassId++;
+                }
             }
         }
 
@@ -140,6 +157,38 @@ public final class CharClassBuilder {
         }
         if (representative == '\n') sig.set(lookBase);
         if (representative == '\r') sig.set(lookBase + 1);
+        return sig;
+    }
+
+    /**
+     * Compute the behavior signature as a {@code long} bitmask for small NFAs
+     * (stateCount + 2 <= 64). Same logic as {@link #computeSignature} but
+     * avoids BitSet allocation.
+     */
+    private static long computeSignatureLong(NFA nfa, int representative) {
+        int lookBase = nfa.stateCount();
+        long sig = 0L;
+        for (int i = 0; i < nfa.stateCount(); i++) {
+            State state = nfa.state(i);
+            switch (state) {
+                case State.CharRange cr -> {
+                    if (representative >= cr.start() && representative <= cr.end()) {
+                        sig |= 1L << resolveTarget(nfa, cr.next());
+                    }
+                }
+                case State.Sparse sp -> {
+                    for (Transition t : sp.transitions()) {
+                        if (representative >= t.start() && representative <= t.end()) {
+                            sig |= 1L << resolveTarget(nfa, t.next());
+                            break;
+                        }
+                    }
+                }
+                default -> {}
+            }
+        }
+        if (representative == '\n') sig |= 1L << lookBase;
+        if (representative == '\r') sig |= 1L << (lookBase + 1);
         return sig;
     }
 
