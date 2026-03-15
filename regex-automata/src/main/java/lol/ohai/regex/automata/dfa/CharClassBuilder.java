@@ -77,22 +77,18 @@ public final class CharClassBuilder {
             return buildUnmerged(nfa, false);
         }
 
-        byte[] flatMap = new byte[65536];
-        for (int r = 0; r < regionCount; r++) {
-            int from = sortedBounds[r];
-            int to = Math.min(sortedBounds[r + 1], 65536);
-            byte cls = (byte) regionClassMap[r];
-            for (int c = from; c < to; c++) {
-                flatMap[c] = cls;
-            }
-        }
-
         Map<ByteArrayKey, Integer> rowIndex = new HashMap<>();
         List<byte[]> uniqueRows = new ArrayList<>();
         int[] highIndex = new int[256];
         for (int hi = 0; hi < 256; hi++) {
             byte[] row = new byte[256];
-            System.arraycopy(flatMap, hi * 256, row, 0, 256);
+            for (int lo = 0; lo < 256; lo++) {
+                int codePoint = (hi << 8) | lo;
+                int region = findRegion(sortedBounds, codePoint);
+                if (region < regionCount) {
+                    row[lo] = (byte) regionClassMap[region];
+                }
+            }
             ByteArrayKey key = new ByteArrayKey(row);
             Integer existing = rowIndex.get(key);
             if (existing != null) {
@@ -241,22 +237,19 @@ public final class CharClassBuilder {
             return null;
         }
 
-        byte[] flatMap = new byte[65536];
-        for (int cls = 0; cls < sortedBounds.length - 1; cls++) {
-            int from = sortedBounds[cls];
-            int to = Math.min(sortedBounds[cls + 1], 65536);
-            for (int c = from; c < to; c++) {
-                flatMap[c] = (byte) cls;
-            }
-        }
-
         Map<ByteArrayKey, Integer> rowIndex = new HashMap<>();
         List<byte[]> uniqueRows = new ArrayList<>();
         int[] highIndex = new int[256];
 
         for (int hi = 0; hi < 256; hi++) {
             byte[] row = new byte[256];
-            System.arraycopy(flatMap, hi * 256, row, 0, 256);
+            for (int lo = 0; lo < 256; lo++) {
+                int codePoint = (hi << 8) | lo;
+                int region = findRegion(sortedBounds, codePoint);
+                if (region < classCount) {
+                    row[lo] = (byte) region;
+                }
+            }
             ByteArrayKey key = new ByteArrayKey(row);
             Integer existing = rowIndex.get(key);
             if (existing != null) {
@@ -367,6 +360,25 @@ public final class CharClassBuilder {
         }
 
         return Arrays.copyOf(buf, out);
+    }
+
+    /**
+     * Binary search: find the index of the highest boundary value <= codePoint.
+     * This is the region (half-open interval [sortedBounds[i], sortedBounds[i+1]))
+     * that contains codePoint.
+     */
+    private static int findRegion(int[] sortedBounds, int codePoint) {
+        int lo = 0;
+        int hi = sortedBounds.length - 1;
+        while (lo < hi) {
+            int mid = (lo + hi + 1) >>> 1;
+            if (sortedBounds[mid] <= codePoint) {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        return lo;
     }
 
     private static boolean isWordChar(char c) {
