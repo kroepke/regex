@@ -39,4 +39,20 @@ public interface Prefilter {
      * Undefined when {@code isExact()} is false.
      */
     int matchLength();
+
+    /**
+     * Find the next occurrence and return both start and end as a packed long.
+     * Returns -1 if not found. Otherwise: start in low 32 bits, end in high 32 bits.
+     *
+     * <p>Default implementation uses {@link #find} + {@link #matchLength()}.
+     * Subclasses with variable-length matches should override this.</p>
+     */
+    default long findSpan(String haystack, int from, int to) {
+        int pos = find(haystack, from, to);
+        if (pos < 0) return -1;
+        return ((long)(pos + matchLength()) << 32) | pos;
+    }
+
+    static int spanStart(long span) { return (int) span; }
+    static int spanEnd(long span) { return (int) (span >>> 32); }
 }

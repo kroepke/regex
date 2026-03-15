@@ -52,6 +52,23 @@ public final class MultiLiteral implements Prefilter {
     }
 
     @Override
+    public long findSpan(String haystack, int from, int to) {
+        int bestPos = -1;
+        int bestLen = 0;
+        for (String needle : needles) {
+            int pos = haystack.indexOf(needle, from);
+            if (pos >= 0 && pos + needle.length() <= to) {
+                if (bestPos == -1 || pos < bestPos) {
+                    bestPos = pos;
+                    bestLen = needle.length();
+                }
+            }
+        }
+        if (bestPos < 0) return -1;
+        return ((long)(bestPos + bestLen) << 32) | bestPos;
+    }
+
+    @Override
     public boolean isExact() {
         return exact;
     }

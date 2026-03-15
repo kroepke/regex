@@ -275,13 +275,6 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
 
     record PrefilterOnly(Prefilter prefilter) implements Strategy {
 
-        public PrefilterOnly {
-            if (!prefilter.isExact()) {
-                throw new IllegalArgumentException(
-                        "PrefilterOnly requires an exact prefilter");
-            }
-        }
-
         @Override
         public Cache createCache() {
             return Cache.EMPTY;
@@ -294,13 +287,13 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
 
         @Override
         public Captures search(Input input, Cache cache) {
-            int pos = prefilter.find(input.haystackStr(), input.start(), input.end());
-            if (pos < 0) {
+            long span = prefilter.findSpan(input.haystackStr(), input.start(), input.end());
+            if (span < 0) {
                 return null;
             }
             Captures caps = new Captures(1);
-            caps.set(0, pos);
-            caps.set(1, pos + prefilter.matchLength());
+            caps.set(0, Prefilter.spanStart(span));
+            caps.set(1, Prefilter.spanEnd(span));
             return caps;
         }
 

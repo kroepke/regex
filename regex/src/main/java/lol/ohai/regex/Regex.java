@@ -86,7 +86,7 @@ public final class Regex {
             Strategy strategy;
             Map<String, Integer> namedGroups;
 
-            if (prefilter != null && prefilter.isExact()
+            if (prefilter != null
                     && prefixes.coversEntirePattern() && !hirHasCaptures(hir)) {
                 strategy = new Strategy.PrefilterOnly(prefilter);
                 namedGroups = Collections.emptyMap();
