@@ -54,15 +54,13 @@ Implementation: `CharClasses` tracks quit chars via `quitNonAscii` flag, `LazyDF
 
 **Complexity:** Medium. The start state computation and match reporting need to be pattern-aware.
 
-## Search Loop Unrolling
+## Search Loop Unrolling — Implemented
 
-**What:** Process 4 chars at a time without checking for special states, then handle specials after the batch.
+**Status: DONE** (2026-03-15)
 
-**Why it matters:** The upstream reports ~30-50% throughput improvement from loop unrolling. Reduces branch mispredictions in the hot loop.
+Both `searchFwd()` and `searchRev()` now use 4× loop unrolling. An inner loop processes 4 transitions per iteration with a single `s <= quit` guard per step. On break-out (match, UNKNOWN, dead, quit), the outer loop re-classifies the triggering char and dispatches via the existing slow path. No semantic changes.
 
-**When to add:** After the basic search loop is correct and benchmarked. This is a pure optimization — no semantic change.
-
-**Complexity:** Low-medium. Need to handle the case where a special state is hit mid-batch (rewind and process one at a time).
+**Design spec:** `docs/superpowers/specs/2026-03-14-lazy-dfa-loop-unrolling-design.md`
 
 ## Look-Around Encoding in DFA States — Implemented
 
