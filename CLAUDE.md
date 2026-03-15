@@ -98,10 +98,12 @@ The project uses Maven with a wrapper script (`./mvnw`). Always use the wrapper 
 - Prefer value objects and immutability; mutable state only where performance requires it
 - Use `java.lang.foreign` (Panama FFI) or `jdk.incubator.vector` (Vector API) only if there's a clear performance case
 
-### Debugging and Diagnostics
+### Debugging and Diagnostics — MANDATORY RULES
+- **Never use `System.out.println` for debugging.** Use the **java-debugger skill** (DebugInspector) to inspect program state at breakpoints. This is non-negotiable. The tool is at: `java /home/kroepke/.claude/plugins/cache/kroepke-marketplace/java-debugger/0.2.0/skills/java-debugger/scripts/DebugInspector.java`
 - **Never write ad-hoc Java files to /tmp for debugging.** Instead, write JUnit tests in the appropriate Maven module (`regex-automata/src/test/` for engine-level, `regex/src/test/` for API-level). Use `./mvnw test -Dtest="ClassName#methodName"` to run them. These tests get correct classpath, dependencies, and can become regression tests.
-- When investigating a bug, write a focused test that reproduces it, check expectations with assertions, and keep the test if the bug was real.
-- For tracing DFA state transitions or NFA behavior, write a test that constructs the engine directly (not through the public API) and asserts on intermediate results.
+- When investigating a bug, write a focused test that reproduces it, use DebugInspector to inspect state at breakpoints, check expectations with assertions, and keep the test if the bug was real.
+- For tracing DFA state transitions or NFA behavior, write a test that constructs the engine directly (not through the public API) and use DebugInspector with `--eval` to inspect intermediate state.
+- **Any test with `System.out.println` is a bug.** Tests must use assertions, not console output.
 
 ### Performance
 - Benchmark before and after significant changes (JMH)

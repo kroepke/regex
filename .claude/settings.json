@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./mvnw *)",
+      "Bash(./mvnw)",
+      "Bash(git *)",
+      "Bash(java -jar *)",
+      "Bash(java /home/kroepke/.claude/plugins/*)",
+      "Bash(ls *)",
+      "Bash(mkdir *)",
+      "Bash(cat *)",
+      "Bash(grep *)",
+      "Bash(wc *)"
+    ]
+  }
+}
