@@ -385,7 +385,7 @@ public final class Regex {
                 groups.add(Optional.empty());
             }
         }
-        return new Captures(overall, Collections.unmodifiableList(groups), namedGroups);
+        return new Captures(overall, List.copyOf(groups), namedGroups);
     }
 
     private static Map<String, Integer> buildNamedGroupMap(NFA nfa) {
@@ -397,7 +397,7 @@ public final class Regex {
                 map.put(name, i);
             }
         }
-        return Collections.unmodifiableMap(map);
+        return Map.copyOf(map);
     }
 
     /**
