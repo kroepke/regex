@@ -202,7 +202,7 @@ public final class Regex {
      */
     public final class Searcher {
         private final CharSequence text;
-        private final Input baseInput;
+        private final Input searchInput;
         private final Strategy.Cache cache;
         private int searchStart;
         private int lastMatchEnd = -1;
@@ -211,7 +211,7 @@ public final class Regex {
 
         Searcher(CharSequence text) {
             this.text = text;
-            this.baseInput = Input.of(text);
+            this.searchInput = Input.of(text);
             this.cache = strategy.createCache();
         }
 
@@ -222,8 +222,8 @@ public final class Regex {
         public boolean find() {
             int end = text.length();
             while (searchStart <= end) {
-                Input input = baseInput.withBounds(searchStart, end, false);
-                lol.ohai.regex.automata.util.Captures caps = strategy.search(input, cache);
+                searchInput.setBounds(searchStart, end, false);
+                lol.ohai.regex.automata.util.Captures caps = strategy.search(searchInput, cache);
                 if (caps == null) return false;
 
                 int s = caps.start(0);
@@ -406,7 +406,7 @@ public final class Regex {
      */
     private abstract class BaseFindIterator<T> implements Iterator<T> {
         final CharSequence text;
-        private final Input baseInput;
+        private final Input searchInput;
         private int searchCharStart = 0;
         private int lastMatchCharEnd = -1; // -1 = no match yet
         private T nextResult;
@@ -414,7 +414,7 @@ public final class Regex {
 
         BaseFindIterator(CharSequence text) {
             this.text = text;
-            this.baseInput = Input.of(text);
+            this.searchInput = Input.of(text);
         }
 
         abstract lol.ohai.regex.automata.util.Captures doSearch(
@@ -447,8 +447,8 @@ public final class Regex {
                     return;
                 }
 
-                Input input = baseInput.withBounds(searchCharStart, text.length(), false);
-                lol.ohai.regex.automata.util.Captures caps = doSearch(input, cache);
+                searchInput.setBounds(searchCharStart, text.length(), false);
+                lol.ohai.regex.automata.util.Captures caps = doSearch(searchInput, cache);
 
                 if (caps == null) {
                     done = true;

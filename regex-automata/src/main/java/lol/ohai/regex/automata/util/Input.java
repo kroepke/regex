@@ -8,9 +8,9 @@ package lol.ohai.regex.automata.util;
  */
 public final class Input {
     private final char[] haystack;
-    private final int start;
-    private final int end;
-    private final boolean anchored;
+    private int start;
+    private int end;
+    private boolean anchored;
     private String haystackStr;
 
     private Input(char[] haystack, int start, int end, boolean anchored) {
@@ -73,6 +73,16 @@ public final class Input {
 
     /** Returns true if this is an anchored search. */
     public boolean isAnchored() { return anchored; }
+
+    /**
+     * Mutates this Input's bounds and anchored flag in-place.
+     * For use in tight iteration loops that reuse a single Input instance.
+     */
+    public void setBounds(int newStart, int newEnd, boolean newAnchored) {
+        this.start = newStart;
+        this.end = newEnd;
+        this.anchored = newAnchored;
+    }
 
     /**
      * Creates a new Input with the same haystack but different bounds and/or anchored flag.
