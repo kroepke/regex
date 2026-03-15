@@ -34,8 +34,7 @@ public final class CharClassBuilder {
             return buildUnmerged(nfa, quitNonAscii);
         }
 
-        TreeSet<Integer> boundaries = collectBoundaries(nfa, false);
-        int[] sortedBounds = boundaries.stream().mapToInt(Integer::intValue).toArray();
+        int[] sortedBounds = collectBoundaries(nfa, false);
         int regionCount = sortedBounds.length - 1;
 
         // Merge: compute behavior signature per region, group by signature.
@@ -179,16 +178,14 @@ public final class CharClassBuilder {
      */
     // Renamed from build(NFA, boolean). Kept for A/B benchmarking.
     public static CharClasses buildUnmerged(NFA nfa, boolean quitNonAscii) {
-        TreeSet<Integer> boundaries = collectBoundaries(nfa, quitNonAscii);
+        int[] sortedBounds = collectBoundaries(nfa, quitNonAscii);
 
-        if (boundaries.size() - 1 > 256 && !quitNonAscii) {
+        if (sortedBounds.length - 1 > 256 && !quitNonAscii) {
             // Too many classes — retry with quit-on-non-ASCII to collapse
             // all non-ASCII characters into quit classes.
-            boundaries = collectBoundaries(nfa, true);
+            sortedBounds = collectBoundaries(nfa, true);
             quitNonAscii = true;
         }
-
-        int[] sortedBounds = boundaries.stream().mapToInt(Integer::intValue).toArray();
         int classCount = sortedBounds.length - 1;
 
         if (classCount > 256) {
@@ -249,60 +246,78 @@ public final class CharClassBuilder {
      * Collect character class boundaries from the NFA's character ranges.
      * When {@code quitNonAscii} is true, boundaries above 128 are collapsed
      * (all non-ASCII characters become a single quit class).
+     *
+     * <p>Returns a sorted, deduplicated {@code int[]} of boundary values.</p>
      */
-    private static TreeSet<Integer> collectBoundaries(NFA nfa, boolean quitNonAscii) {
-        TreeSet<Integer> boundaries = new TreeSet<>();
-        boundaries.add(0);
-        boundaries.add(0x10000);
+    private static int[] collectBoundaries(NFA nfa, boolean quitNonAscii) {
+        int capacity = 64;
+        int[] buf = new int[capacity];
+        int size = 0;
 
+        // Helper: append a value to buf, growing if needed.
+        // (Inline growth logic below to avoid lambda overhead.)
+
+        buf[size++] = 0;
+        buf[size++] = 0x10000;
         if (quitNonAscii) {
-            boundaries.add(128);
+            buf[size++] = 128;
         }
 
         for (int i = 0; i < nfa.stateCount(); i++) {
             State state = nfa.state(i);
             switch (state) {
                 case State.CharRange cr -> {
-                    boundaries.add(cr.start());
-                    boundaries.add(cr.end() + 1);
+                    if (size + 2 > buf.length) buf = Arrays.copyOf(buf, buf.length * 2);
+                    buf[size++] = cr.start();
+                    buf[size++] = cr.end() + 1;
                 }
                 case State.Sparse sp -> {
                     for (Transition t : sp.transitions()) {
-                        boundaries.add(t.start());
-                        boundaries.add(t.end() + 1);
+                        if (size + 2 > buf.length) buf = Arrays.copyOf(buf, buf.length * 2);
+                        buf[size++] = t.start();
+                        buf[size++] = t.end() + 1;
                     }
                 }
                 default -> {}
             }
         }
 
-        // When quit chars are configured, all non-ASCII characters trigger
-        // DFA quit — remove boundaries >= 129 to collapse them into one class.
-        if (quitNonAscii) {
-            boundaries.subSet(129, 0x10000).clear();
-        }
-
         // Force boundaries for characters that look-assertions depend on.
         LookSet lookSetAny = nfa.lookSetAny();
         if (!lookSetAny.isEmpty()) {
-            boundaries.add((int) '\n');
-            boundaries.add((int) '\n' + 1);
-            boundaries.add((int) '\r');
-            boundaries.add((int) '\r' + 1);
+            if (size + 4 > buf.length) buf = Arrays.copyOf(buf, buf.length * 2);
+            buf[size++] = (int) '\n';
+            buf[size++] = (int) '\n' + 1;
+            buf[size++] = (int) '\r';
+            buf[size++] = (int) '\r' + 1;
 
             if (lookSetAny.containsWord()) {
-                boundaries.add((int) '0');
-                boundaries.add((int) '9' + 1);
-                boundaries.add((int) 'A');
-                boundaries.add((int) 'Z' + 1);
-                boundaries.add((int) '_');
-                boundaries.add((int) '_' + 1);
-                boundaries.add((int) 'a');
-                boundaries.add((int) 'z' + 1);
+                if (size + 8 > buf.length) buf = Arrays.copyOf(buf, buf.length * 2);
+                buf[size++] = (int) '0';
+                buf[size++] = (int) '9' + 1;
+                buf[size++] = (int) 'A';
+                buf[size++] = (int) 'Z' + 1;
+                buf[size++] = (int) '_';
+                buf[size++] = (int) '_' + 1;
+                buf[size++] = (int) 'a';
+                buf[size++] = (int) 'z' + 1;
             }
         }
 
-        return boundaries;
+        Arrays.sort(buf, 0, size);
+
+        // Deduplicate in-place; also filter out [129, 0x10000) if quitNonAscii.
+        int out = 0;
+        int prev = -1;
+        for (int i = 0; i < size; i++) {
+            int v = buf[i];
+            if (v == prev) continue;
+            if (quitNonAscii && v >= 129 && v < 0x10000) continue;
+            buf[out++] = v;
+            prev = v;
+        }
+
+        return Arrays.copyOf(buf, out);
     }
 
     private static boolean isWordChar(char c) {
