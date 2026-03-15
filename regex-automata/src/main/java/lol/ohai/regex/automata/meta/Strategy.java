@@ -145,13 +145,13 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
             int matchEnd = SearchResult.matchOffset(fwdResult);
             if (matchEnd == input.start()) {
                 // Empty match
-                Captures caps = new Captures(1);
+                Captures caps = cache.forwardDFACache().scratchCaptures();
                 caps.set(0, matchEnd);
                 caps.set(1, matchEnd);
                 return caps;
             }
             if (input.isAnchored()) {
-                Captures caps = new Captures(1);
+                Captures caps = cache.forwardDFACache().scratchCaptures();
                 caps.set(0, input.start());
                 caps.set(1, matchEnd);
                 return caps;
@@ -164,7 +164,7 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
             Input revInput = input.withBounds(input.start(), matchEnd, true);
             long revResult = reverseDFA.searchRevLong(revInput, cache.reverseDFACache());
             if (SearchResult.isMatch(revResult)) {
-                Captures caps = new Captures(1);
+                Captures caps = cache.forwardDFACache().scratchCaptures();
                 caps.set(0, SearchResult.matchOffset(revResult));
                 caps.set(1, matchEnd);
                 return caps;

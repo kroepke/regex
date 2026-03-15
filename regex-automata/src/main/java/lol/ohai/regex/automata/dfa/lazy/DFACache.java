@@ -1,6 +1,7 @@
 package lol.ohai.regex.automata.dfa.lazy;
 
 import lol.ohai.regex.automata.dfa.CharClasses;
+import lol.ohai.regex.automata.util.Captures;
 import lol.ohai.regex.automata.util.SparseSet;
 import java.util.*;
 
@@ -31,6 +32,7 @@ public final class DFACache {
     int statesCreated;
 
     private final int maxStates;
+    private Captures scratchCaptures;
 
     public DFACache(CharClasses charClasses, int capacityBytes) {
         this(charClasses, capacityBytes, 0);
@@ -84,6 +86,16 @@ public final class DFACache {
 
     public StateContent getState(int rawStateId) {
         return states.get(rawStateId / stride);
+    }
+
+    /** Returns a reusable Captures(1) instance, lazily created and cleared. */
+    public Captures scratchCaptures() {
+        if (scratchCaptures == null) {
+            scratchCaptures = new Captures(1);
+        } else {
+            scratchCaptures.clear();
+        }
+        return scratchCaptures;
     }
 
     public int stateCount() { return states.size(); }
