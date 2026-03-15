@@ -167,6 +167,88 @@ public final class Regex {
     }
 
     /**
+     * Creates a reusable {@link Searcher} for iterating matches without per-match allocation.
+     *
+     * <p>Unlike {@link #findAll}, which creates a {@link Match} record (including
+     * a substring) per match, the searcher exposes only {@code start()} and
+     * {@code end()} offsets via primitive-returning methods. This eliminates
+     * all per-match object allocation.</p>
+     *
+     * <p>The searcher is <em>not</em> thread-safe — each thread must create its own.
+     * The typical usage pattern mirrors JDK's {@code Matcher}:</p>
+     * <pre>{@code
+     * Regex.Searcher s = regex.searcher(text);
+     * while (s.find()) {
+     *     int start = s.start();
+     *     int end = s.end();
+     * }
+     * }</pre>
+     */
+    public Searcher searcher(CharSequence text) {
+        return new Searcher(text);
+    }
+
+    /**
+     * A stateful, reusable search cursor for zero-allocation match iteration.
+     * Analogous to JDK's {@link java.util.regex.Matcher} but without mutable group state.
+     */
+    public final class Searcher {
+        private final CharSequence text;
+        private final Input baseInput;
+        private final Strategy.Cache cache;
+        private int searchStart;
+        private int lastMatchEnd = -1;
+        private int matchStart = -1;
+        private int matchEnd = -1;
+
+        Searcher(CharSequence text) {
+            this.text = text;
+            this.baseInput = Input.of(text);
+            this.cache = strategy.createCache();
+        }
+
+        /**
+         * Finds the next non-overlapping match. Returns true if found, after which
+         * {@link #start()} and {@link #end()} return the match span.
+         */
+        public boolean find() {
+            int end = text.length();
+            while (searchStart <= end) {
+                Input input = baseInput.withBounds(searchStart, end, false);
+                lol.ohai.regex.automata.util.Captures caps = strategy.search(input, cache);
+                if (caps == null) return false;
+
+                int s = caps.start(0);
+                int e = caps.end(0);
+
+                // Skip repeated empty matches at same position
+                if (s == e && e == lastMatchEnd) {
+                    if (e < end) {
+                        searchStart = e + Character.charCount(
+                                Character.codePointAt(text, e));
+                    } else {
+                        searchStart = e + 1;
+                    }
+                    continue;
+                }
+
+                matchStart = s;
+                matchEnd = e;
+                lastMatchEnd = e;
+                searchStart = e;
+                return true;
+            }
+            return false;
+        }
+
+        /** Start offset of the most recent match (inclusive). */
+        public int start() { return matchStart; }
+
+        /** End offset of the most recent match (exclusive). */
+        public int end() { return matchEnd; }
+    }
+
+    /**
      * Returns true if the pattern matches anywhere in the input.
      */
     public boolean isMatch(CharSequence text) {
