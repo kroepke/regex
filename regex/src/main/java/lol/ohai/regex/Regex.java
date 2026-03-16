@@ -96,7 +96,7 @@ public final class Regex {
                 CharClasses charClasses = CharClassBuilder.build(nfa, quitNonAscii);
                 PikeVM pikeVM = new PikeVM(nfa);
                 LazyDFA forwardDFA = charClasses != null
-                        ? LazyDFA.create(nfa, charClasses) : null;
+                        ? LazyDFA.create(nfa, charClasses, prefilter) : null;
 
                 LazyDFA reverseDFA = null;
                 if (forwardDFA != null) {
