@@ -625,7 +625,16 @@ public final class LazyDFA {
     /**
      * Check if the input matches the NFA transition range [rangeStart, rangeEnd].
      * Uses direct char comparison when available (correct with merged equivalence
-     * classes). Falls back to class-ID comparison for EOI transitions.
+     * classes). Falls back to class-representative comparison when no input char
+     * is provided (e.g., EOI transitions or DenseDFA builder).
+     *
+     * <p>The fallback uses the class representative: a concrete char known to
+     * belong to the given class. This avoids the broken class-ID comparison
+     * ({@code classId >= classify(rangeStart) && classId <= classify(rangeEnd)})
+     * which fails when a range spans multiple equivalence classes with
+     * non-contiguous IDs or when merged classes collapse distinct ranges
+     * to the same class ID.</p>
+     *
      * Ref: upstream/regex/regex-automata/src/util/determinize/mod.rs:288-289
      * (upstream uses trans.matches_unit(unit) — a direct byte comparison)
      */
@@ -634,8 +643,25 @@ public final class LazyDFA {
         if (inputChar >= 0) {
             return inputChar >= rangeStart && inputChar <= rangeEnd;
         }
-        return classId >= charClasses.classify((char) rangeStart)
-                && classId <= charClasses.classify((char) rangeEnd);
+        // Fallback for when no concrete input char is available (EOI transitions
+        // or DenseDFA builder's computeAllTransitions).
+        //
+        // Check 1: class-ID comparison. Correct when the range endpoints map
+        // to distinct classes with contiguous IDs.
+        int classOfStart = charClasses.classify((char) rangeStart);
+        int classOfEnd = charClasses.classify((char) rangeEnd);
+        if (classId >= classOfStart && classId <= classOfEnd) {
+            return true;
+        }
+        // Check 2: use the class representative. Handles the case where a wide
+        // range (e.g., prefix loop's [0, 0xFFFF]) has both endpoints in class 0
+        // but the target classId is > 0. The representative char is a concrete
+        // member of the class and can be directly compared against the range.
+        int rep = charClasses.classRepresentative(classId);
+        if (rep >= 0) {
+            return rep >= rangeStart && rep <= rangeEnd;
+        }
+        return false;
     }
 
     // -- Packed result helpers --

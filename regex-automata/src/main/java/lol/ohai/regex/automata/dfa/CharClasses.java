@@ -14,8 +14,13 @@ public final class CharClasses {
     private final byte[] classFlags;    // indexed by class ID, bit flags
     private final boolean hasQuitClasses;
     private final byte[] asciiTable;    // flat lookup for c < 128
+    private final int[] classReps;      // representative char per class (for DenseDFA builder)
 
     CharClasses(byte[][] rows, int[] highIndex, int classCount, byte[] classFlags) {
+        this(rows, highIndex, classCount, classFlags, null);
+    }
+
+    CharClasses(byte[][] rows, int[] highIndex, int classCount, byte[] classFlags, int[] classReps) {
         this.rows = rows;
         this.highIndex = highIndex;
         this.classCount = classCount;
@@ -30,6 +35,7 @@ public final class CharClasses {
         this.hasQuitClasses = anyQuit;
         this.asciiTable = new byte[128];
         System.arraycopy(rows[highIndex[0]], 0, asciiTable, 0, 128);
+        this.classReps = classReps;
     }
 
     public int classify(char c) {
@@ -65,6 +71,22 @@ public final class CharClasses {
 
     public boolean hasQuitClasses() {
         return hasQuitClasses;
+    }
+
+    /**
+     * Returns a representative char for the given equivalence class, or -1
+     * if no representative is available (e.g., for EOI class or when
+     * class representatives were not provided at construction time).
+     *
+     * <p>Used by the DenseDFA builder to pass a concrete input char to
+     * {@code computeNextState}, avoiding the broken class-based fallback
+     * in {@code charInRange} for ranges that span multiple classes.</p>
+     */
+    public int classRepresentative(int classId) {
+        if (classReps != null && classId >= 0 && classId < classReps.length) {
+            return classReps[classId];
+        }
+        return -1;
     }
 
     public static CharClasses identity() {

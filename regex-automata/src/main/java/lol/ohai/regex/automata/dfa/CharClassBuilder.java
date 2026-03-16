@@ -122,7 +122,7 @@ public final class CharClassBuilder {
             }
         }
 
-        return new CharClasses(uniqueRows.toArray(byte[][]::new), highIndex, classCount, classFlags);
+        return new CharClasses(uniqueRows.toArray(byte[][]::new), highIndex, classCount, classFlags, classRep);
     }
 
     /**
@@ -281,7 +281,13 @@ public final class CharClassBuilder {
             }
         }
 
-        return new CharClasses(uniqueRows.toArray(byte[][]::new), highIndex, classCount, classFlags);
+        // Build class representatives from sortedBounds (each class's first codepoint)
+        int[] classRepUnmerged = new int[classCount];
+        for (int cls = 0; cls < classCount; cls++) {
+            classRepUnmerged[cls] = sortedBounds[cls];
+        }
+
+        return new CharClasses(uniqueRows.toArray(byte[][]::new), highIndex, classCount, classFlags, classRepUnmerged);
     }
 
     /**
