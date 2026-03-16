@@ -1,7 +1,7 @@
 # DFA JIT Headroom: Cold Path Extraction + Prefilter at Start State
 
 **Date:** 2026-03-16
-**Status:** Phase 1 complete (PASS). Phase 2 ready for implementation.
+**Status:** Phase 1 complete (PASS). Phase 2 implemented and reverted — fundamentally redundant with Strategy-level prefiltering.
 **Depends on:** Stage 10 (allocation cleanup)
 
 ## Motivation
@@ -187,6 +187,18 @@ Additional micro-optimizations applied: `charsSearched` local eliminated from ho
 Benchmark delta (same-session vs baseline): rawUnicodeWord **+14%**, multiline **+5%**, charClass **+4%**. No regressions. rawCharClass regression from extraction-only step was fixed by charsSearched elimination.
 
 **Phase 2 gate: PASS.** 141 bytes of headroom available. Prefilter-at-start estimated at ~50-60 bytes.
+
+**Phase 2 Result (2026-03-16): REVERTED**
+
+Implemented and benchmarked. Added 119 bytecodes (472→591), no meaningful improvement on any benchmark. Reverted.
+
+Root cause: prefilter-at-start is redundant with existing infrastructure.
+1. Patterns that benefit from prefilter (literal prefixes) are already handled by `Strategy.Core.prefilterLoop()` at the Strategy level, or by `PrefilterOnly` for pure literals.
+2. The benchmarks we want to improve (`charClass`, `multiline`, `unicodeWord`) have NO literal prefix → no prefilter exists to invoke.
+3. The `lookSetAny.isEmpty()` guard was a red herring — even without it, `(?m)^.+$` has no prefilter (`.+` has no literal prefix).
+4. The 119 bytes of added bytecode threatened JIT gains from Phase 1 (charClass dipped -6%).
+
+**Conclusion:** DFA-internal prefilter-at-start matches upstream's architecture but is redundant in our implementation because our Strategy layer already does the same work. The remaining benchmark gaps (charClass 3.4x, multiline 4.0x) require **acceleration states** — self-loop detection with escape tables — which work without literal prefixes. This is a separate, more substantial effort.
 
 ## Phase 2: Prefilter at Start State (conditional)
 
