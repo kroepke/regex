@@ -1,7 +1,6 @@
 package lol.ohai.regex.automata.dfa.lazy;
 
 import lol.ohai.regex.automata.dfa.CharClasses;
-import lol.ohai.regex.automata.meta.Prefilter;
 import lol.ohai.regex.automata.nfa.thompson.NFA;
 import lol.ohai.regex.automata.nfa.thompson.State;
 import lol.ohai.regex.automata.nfa.thompson.Transition;
@@ -45,16 +44,14 @@ public final class LazyDFA {
     private final LookSet lookSetAny;
     private final int dead;
     private final int quit;
-    private final Prefilter prefilter; // null if no prefilter available
 
-    private LazyDFA(NFA nfa, CharClasses charClasses, Prefilter prefilter) {
+    private LazyDFA(NFA nfa, CharClasses charClasses) {
         this.nfa = nfa;
         this.charClasses = charClasses;
         this.lookSetAny = nfa.lookSetAny();
         int stride = charClasses.stride();
         this.dead = DFACache.dead(stride);
         this.quit = DFACache.quit(stride);
-        this.prefilter = prefilter;
     }
 
     /**
@@ -74,26 +71,7 @@ public final class LazyDFA {
         if (looks.containsUnicodeWord() && !charClasses.hasQuitClasses()) {
             return null;
         }
-        return new LazyDFA(nfa, charClasses, null);
-    }
-
-    /**
-     * Creates a LazyDFA with a prefilter for the forward DFA, or {@code null}
-     * if the NFA is not compatible with the lazy DFA.
-     *
-     * <p>The prefilter is used in {@link #searchFwdLong} to skip ahead to the
-     * next candidate position when the DFA is in the start state. It is only
-     * applied when the pattern has no look-assertions (universal start state),
-     * and the search is unanchored.</p>
-     *
-     * @param prefilter may be null — if null, behaves identically to
-     *                  {@link #create(NFA, CharClasses)}
-     */
-    public static LazyDFA create(NFA nfa, CharClasses charClasses, Prefilter prefilter) {
-        LookSet looks = nfa.lookSetAny();
-        if (looks.containsCrlf()) return null;
-        if (looks.containsUnicodeWord() && !charClasses.hasQuitClasses()) return null;
-        return new LazyDFA(nfa, charClasses, prefilter);
+        return new LazyDFA(nfa, charClasses);
     }
 
     /** Creates a per-search cache. */
@@ -139,30 +117,7 @@ public final class LazyDFA {
         int lastMatchEnd = -1;
         int startPos = pos;
 
-        // Point 1: initial prefilter skip before the main loop.
-        // Only when unanchored and the start state doesn't depend on look-behind context
-        // (lookSetAny.isEmpty() guarantees the start state is position-independent).
-        // Ref: upstream/regex/regex-automata/src/hybrid/search.rs:72-83
-        int startSid = sid;
-        if (prefilter != null && !input.isAnchored() && lookSetAny.isEmpty()) {
-            int candidate = prefilter.find(input.haystackStr(), pos, end);
-            if (candidate < 0) return SearchResult.NO_MATCH;
-            pos = candidate;
-        }
-
         while (pos < end) {
-            // Point 2: prefilter at start state between matches.
-            // When we've returned to the start state after consuming some chars, use the
-            // prefilter to skip ahead to the next candidate rather than scanning char-by-char.
-            // Guard pos > startPos prevents redundant call (Point 1 already covered pos == startPos).
-            // Ref: upstream/regex/regex-automata/src/hybrid/search.rs:233-262
-            if (sid == startSid && prefilter != null && pos > startPos) {
-                int candidate = prefilter.find(input.haystackStr(), pos, end);
-                if (candidate < 0) break;
-                if (candidate > pos) {
-                    pos = candidate;
-                }
-            }
             // Inner unrolled loop: process 4 transitions per iteration.
             // The guard (pos + 3 < end) ensures all 4 haystack accesses are in bounds.
             // Only cached, non-special transitions (nextSid > quit) stay in the inner loop.
