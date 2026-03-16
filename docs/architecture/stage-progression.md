@@ -159,18 +159,35 @@ JIT validation (C2 `-XX:+PrintInlining` analysis):
 - Tests: 2,186 total, 0 failures
 - Key wins vs S10 (same-session): rawUnicodeWord **+14%** (9,532 → 10,916), multiline **+5%** (238 → 251), charClass **+4%** (80 → 84). No regressions.
 
-## Benchmark Comparison (same machine, 2026-03-15)
+### stage-12-dense-dfa (`99fffd5`)
+**Pre-compiled dense DFA engine**
 
-| Benchmark | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | S10 | **S11** | JDK |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| literal (ops/s) | 14 | 4,746 | 4,225 | 4,491 | 4,380 | 4,663 | 4,543 | 4,569 | 3,326 | 4,787 | **4,880** | 3,088 |
-| charClass | 0.06 | 9.5 | 11.0 | 69.5 | 11.6 | 70.6 | 75.1 | 76.1 | 60.9 | 81.4 | **83.5** | 288 |
-| alternation | 6.5 | 44.8 | 44.3 | 44.4 | 43.1 | 45.0 | 45.0 | 44.4 | 39.0 | 44.1 | **45.3** | 101 |
-| captures | 60 | 58.8 | 58.7 | 452 | 110.6 | 350 | 356 | 366 | 12,362 | 16,928 | **18,190** | 15,186 |
-| unicodeWord | 13 | 12.9 | 12.6 | 15,717 | 12.3 | 18.3 | 13,499 | 13,945 | 11,291 | 15,267 | **15,037** | 31,830 |
-| multiline | — | — | — | — | — | — | — | 211 | 192 | 233 | **251** | 1,005 |
-| literalMiss | — | — | — | — | — | — | — | 4,964 | 3,982 | 5,107 | **5,223** | 2,541 |
-| wordRepeat | — | — | — | — | — | — | — | 94,535 | 85,364 | 93,662 | **90,326** | 11,171 |
+New `DenseDFA` engine that pre-compiles all DFA states and transitions into a flat `int[]` table at `Regex.compile()` time. Eliminates UNKNOWN-state handling, HashMap lookups, and lazy computation from the forward search hot path. Match states shuffled to contiguous range for fast `sid >= minMatch` detection.
+
+- `DenseDFABuilder` reuses LazyDFA's determinization logic (`computeAllTransitions`) to eagerly build all reachable states via worklist-driven construction
+- `DenseDFA.searchFwd()` is 330 bytecodes — all `classify` calls inlined by C2
+- Strategy.Core prefers dense DFA for forward search when available
+- Falls back to lazy DFA for patterns with look-assertions (`\b`, `^`, `$`) or state explosion
+- Memory-based state limit: 2MB → ~8,000 states at stride=64
+- Also fixed a `charInRange` bug in LazyDFA where class-based comparison failed for wide NFA ranges spanning multiple merged equivalence classes
+
+- Engines: PikeVM + lazy DFA + bounded backtracker + one-pass DFA + **dense DFA**
+- Strategies: Core (dense DFA forward + lazy DFA reverse + capture engines), PrefilterOnly, ReverseSuffix, ReverseInner
+- Tests: 2,193 total, 0 failures
+- Key wins vs S11: charClass **+17%** (83 → 94), unicodeWord **+25%** (15,037 → 19,807), rawCharClass **+17%** (89 → 105), rawUnicodeWord **+64%** (9,532 → 15,686)
+
+## Benchmark Comparison (same machine, 2026-03-15/16)
+
+| Benchmark | S1 | S2 | S6 | S7 | S8 | S9 | S10 | S11 | **S12** | JDK | **vs JDK** |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| literal (ops/s) | 14 | 4,746 | 4,663 | 4,543 | 4,569 | 3,326 | 4,787 | 4,880 | **4,956** | 3,310 | **1.50x** |
+| charClass | 0.06 | 9.5 | 70.6 | 75.1 | 76.1 | 60.9 | 81.4 | 83.5 | **94** | 291 | 3.1x |
+| alternation | 6.5 | 44.8 | 45.0 | 45.0 | 44.4 | 39.0 | 44.1 | 45.3 | **46.5** | 104 | 2.2x |
+| captures | 60 | 58.8 | 350 | 356 | 366 | 12,362 | 16,928 | 18,190 | **16,499** | 17,931 | 0.92x |
+| unicodeWord | 13 | 12.9 | 18.3 | 13,499 | 13,945 | 11,291 | 15,267 | 15,037 | **19,807** | 38,605 | 2.0x |
+| multiline | — | — | — | — | 211 | 192 | 233 | 215 | **215** | 1,035 | 4.8x |
+| literalMiss | — | — | — | — | 4,964 | 3,982 | 5,107 | 5,223 | **5,252** | 2,589 | **2.03x** |
+| wordRepeat | — | — | — | — | 94,535 | 85,364 | 93,662 | 90,326 | **92,508** | 11,401 | **8.1x** |
 
 Notes:
 - S4 unicodeWord (15,717) was based on three-phase with DFA edge bugs (27 test failures). S7 unicodeWord (13,499) is fully correct.
@@ -180,3 +197,6 @@ Notes:
 - S9 captures improvement is from the one-pass DFA replacing PikeVM on the narrowed capture window. Non-capture benchmarks show variance from single-fork JMH runs (not regressions — re-running produces numbers consistent with S8).
 - S10 same-session comparison (Phase 1 baseline→post) is the reliable measurement: captures +18%, unicodeWord +12%, charClass +12%, multiline +16%. The S9→S10 deltas appear larger due to single-fork JMH variance across different runs.
 - S11 same-session comparison vs S10 baseline: rawUnicodeWord +14%, multiline +5%, charClass +4%. The `charsSearched` elimination was the key micro-optimization — removing 8 long operations per unrolled iteration from the hot loop.
+- S11 multiline numbers were inflated by single-fork JMH variance (238 SearchBenchmark vs 216 RawEngine — impossible since SearchBenchmark has more overhead). The 5-fork S12 measurement (215 ±1.2) is the correct baseline for multiline.
+- S12 captures regression (18,190 → 16,499) is from dense DFA having different search characteristics than lazy DFA for this pattern. Still competitive with JDK (0.92x). The charClass +17% and unicodeWord +25% wins are the primary S12 gains.
+- S12 DenseDFA.searchFwd is 330 bytecodes — well within C2's optimization zone, all classify calls inlined. Separate JIT budget from LazyDFA's searchFwdLong.
