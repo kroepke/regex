@@ -472,6 +472,51 @@ class LazyDFATest {
         assertEquals(3, ((SearchResult.Match) result).offset());
     }
 
+    // -- computeAllTransitions --
+
+    @Test
+    void computeAllTransitionsPopulatesAllClasses() throws Exception {
+        NFA nfa = compileNfa("[a-z]+");
+        CharClasses cc = CharClassBuilder.build(nfa);
+        LazyDFA dfa = LazyDFA.create(nfa, cc);
+        assertNotNull(dfa);
+        DFACache cache = dfa.createCache();
+
+        Input input = Input.of("test");
+        int sid = dfa.getOrComputeStartState(input, cache);
+
+        int beforeCount = dfa.computeAllTransitions(cache, sid);
+
+        // After computeAllTransitions, no transition should be UNKNOWN
+        int rawSid = sid & 0x7FFF_FFFF;
+        for (int cls = 0; cls <= cc.classCount(); cls++) {
+            assertNotEquals(DFACache.UNKNOWN, cache.nextState(rawSid, cls),
+                    "class " + cls + " should not be UNKNOWN after computeAllTransitions");
+        }
+
+        // New states should have been created
+        assertTrue(cache.stateCount() > beforeCount,
+                "computeAllTransitions should create new states");
+    }
+
+    @Test
+    void computeAllTransitionsWorksForAlternation() throws Exception {
+        NFA nfa = compileNfa("cat|dog");
+        CharClasses cc = CharClassBuilder.build(nfa);
+        LazyDFA dfa = LazyDFA.create(nfa, cc);
+        assertNotNull(dfa);
+        DFACache cache = dfa.createCache();
+
+        Input input = Input.of("test");
+        int sid = dfa.getOrComputeStartState(input, cache);
+        dfa.computeAllTransitions(cache, sid);
+
+        int rawSid = sid & 0x7FFF_FFFF;
+        for (int cls = 0; cls <= cc.classCount(); cls++) {
+            assertNotEquals(DFACache.UNKNOWN, cache.nextState(rawSid, cls));
+        }
+    }
+
     // -- Helpers --
 
     private SearchResult search(String pattern, String haystack) {
@@ -520,5 +565,11 @@ class LazyDFATest {
         } catch (Exception e) {
             throw new RuntimeException("Failed to compile reverse: " + pattern, e);
         }
+    }
+
+    private static NFA compileNfa(String pattern) throws Exception {
+        Ast ast = Parser.parse(pattern, 250);
+        Hir hir = Translator.translate(pattern, ast);
+        return Compiler.compile(hir);
     }
 }

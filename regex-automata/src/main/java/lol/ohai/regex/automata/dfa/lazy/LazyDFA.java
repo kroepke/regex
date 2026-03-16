@@ -80,6 +80,26 @@ public final class LazyDFA {
     }
 
     /**
+     * Eagerly computes transitions for ALL equivalence classes (including EOI)
+     * for the given DFA state. Used by DenseDFABuilder to fully populate the
+     * transition table.
+     *
+     * @return the state count before computation (compare with cache.stateCount()
+     *         after to discover newly-created states)
+     */
+    public int computeAllTransitions(DFACache cache, int sid) {
+        int beforeCount = cache.stateCount();
+        int rawSid = sid & 0x7FFF_FFFF;
+        for (int cls = 0; cls <= charClasses.classCount(); cls++) {
+            if (cache.nextState(rawSid, cls) == DFACache.UNKNOWN) {
+                int nextSid = computeNextState(cache, rawSid, cls);
+                cache.setTransition(rawSid, cls, nextSid);
+            }
+        }
+        return beforeCount;
+    }
+
+    /**
      * Forward search for the end position of the leftmost-first match.
      *
      * <p>Because matches are delayed by one char unit, the match end position
@@ -281,7 +301,8 @@ public final class LazyDFA {
 
     // -- Internal: start state --
 
-    private int getOrComputeStartState(Input input, DFACache cache) {
+    // public for DenseDFABuilder
+    public int getOrComputeStartState(Input input, DFACache cache) {
         if (lookSetAny.isEmpty()) {
             // Fast path: no look-assertions, use simple anchored/unanchored
             if (input.isAnchored()) {
