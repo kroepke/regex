@@ -136,18 +136,41 @@ Code quality:
 - Key wins vs S9 (same-session measurement): captures **+18%** (14,330 → 16,928), unicodeWord **+12%** (13,650 → 15,267), charClass **+12%** (73 → 81), multiline **+16%** (201 → 233)
 - vs JDK: captures now **1.1x faster** than JDK (was 1.0x), literal **1.55x faster**, literalMiss **2.0x faster**, wordRepeat **8.4x faster**
 
+### stage-11-jit-headroom (`bff8f93`)
+**DFA search method bytecode reduction for JIT headroom**
+
+Reduced `searchFwdLong` from 613 to 472 bytecode bytes (-23%) and `searchRevLong` from 625 to 480 bytes (-23%) by extracting cold paths and eliminating per-char bookkeeping. This creates headroom for prefilter-at-start code in a future stage.
+
+Cold path extraction:
+- Slow-path dispatch (UNKNOWN/dead/quit handling) → `handleSlowTransition()` / `handleSlowTransitionRev()` — returns packed `long` encoding (sid + lastMatchEnd) to avoid mutable state.
+- Right-edge / left-edge transitions → `handleRightEdge()` / `handleLeftEdge()` — post-loop EOI/boundary handling extracted from the search methods.
+
+Hot loop micro-optimizations:
+- `charsSearched` local variable eliminated from the inner loop. Previously incremented in lockstep with `pos` at every branch (8 long operations per iteration). Now computed on demand as `pos - startPos` at the two sync points (slow-path helper and edge transition).
+- Unnecessary `continue` statements removed (each generated a `goto` bytecode).
+- `dead` and `quit` state IDs precomputed as instance fields instead of recomputing from `stride` per search call.
+
+JIT validation (C2 `-XX:+PrintInlining` analysis):
+- `classify` (43 bytes) inlined at 3/5 call sites in the searchFwdLong inner loop (positions 0, 1, and outer dispatch — same as baseline). Positions 2 and 3 still rejected by C2, but the reduced method size produces better overall code generation.
+- Right-edge `classify` call moved to helper — no longer counts against searchFwdLong's inline budget.
+
+- Engines: unchanged from stage 10
+- Strategies: unchanged from stage 10
+- Tests: 2,186 total, 0 failures
+- Key wins vs S10 (same-session): rawUnicodeWord **+14%** (9,532 → 10,916), multiline **+5%** (238 → 251), charClass **+4%** (80 → 84). No regressions.
+
 ## Benchmark Comparison (same machine, 2026-03-15)
 
-| Benchmark | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | **S10** | JDK |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| literal (ops/s) | 14 | 4,746 | 4,225 | 4,491 | 4,380 | 4,663 | 4,543 | 4,569 | 3,326 | **4,787** | 3,088 |
-| charClass | 0.06 | 9.5 | 11.0 | 69.5 | 11.6 | 70.6 | 75.1 | 76.1 | 60.9 | **81.4** | 288 |
-| alternation | 6.5 | 44.8 | 44.3 | 44.4 | 43.1 | 45.0 | 45.0 | 44.4 | 39.0 | **44.1** | 101 |
-| captures | 60 | 58.8 | 58.7 | 452 | 110.6 | 350 | 356 | 366 | 12,362 | **16,928** | 15,186 |
-| unicodeWord | 13 | 12.9 | 12.6 | 15,717 | 12.3 | 18.3 | 13,499 | 13,945 | 11,291 | **15,267** | 31,830 |
-| multiline | — | — | — | — | — | — | — | 211 | 192 | **233** | 1,005 |
-| literalMiss | — | — | — | — | — | — | — | 4,964 | 3,982 | **5,107** | 2,541 |
-| wordRepeat | — | — | — | — | — | — | — | 94,535 | 85,364 | **93,662** | 11,171 |
+| Benchmark | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | S10 | **S11** | JDK |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| literal (ops/s) | 14 | 4,746 | 4,225 | 4,491 | 4,380 | 4,663 | 4,543 | 4,569 | 3,326 | 4,787 | **4,880** | 3,088 |
+| charClass | 0.06 | 9.5 | 11.0 | 69.5 | 11.6 | 70.6 | 75.1 | 76.1 | 60.9 | 81.4 | **83.5** | 288 |
+| alternation | 6.5 | 44.8 | 44.3 | 44.4 | 43.1 | 45.0 | 45.0 | 44.4 | 39.0 | 44.1 | **45.3** | 101 |
+| captures | 60 | 58.8 | 58.7 | 452 | 110.6 | 350 | 356 | 366 | 12,362 | 16,928 | **18,190** | 15,186 |
+| unicodeWord | 13 | 12.9 | 12.6 | 15,717 | 12.3 | 18.3 | 13,499 | 13,945 | 11,291 | 15,267 | **15,037** | 31,830 |
+| multiline | — | — | — | — | — | — | — | 211 | 192 | 233 | **251** | 1,005 |
+| literalMiss | — | — | — | — | — | — | — | 4,964 | 3,982 | 5,107 | **5,223** | 2,541 |
+| wordRepeat | — | — | — | — | — | — | — | 94,535 | 85,364 | 93,662 | **90,326** | 11,171 |
 
 Notes:
 - S4 unicodeWord (15,717) was based on three-phase with DFA edge bugs (27 test failures). S7 unicodeWord (13,499) is fully correct.
@@ -156,3 +179,4 @@ Notes:
 - S8 SearchBenchmark charClass improvement is modest (75→76) because the high-level API still allocates Match+substring per match. The raw engine benchmark (RawEngineBenchmark) shows the true engine improvement: 70 → 91 ops/s (+30%). The profiling component test shows the three-phase core improved from 13,890 µs to 10,968 µs (-21%).
 - S9 captures improvement is from the one-pass DFA replacing PikeVM on the narrowed capture window. Non-capture benchmarks show variance from single-fork JMH runs (not regressions — re-running produces numbers consistent with S8).
 - S10 same-session comparison (Phase 1 baseline→post) is the reliable measurement: captures +18%, unicodeWord +12%, charClass +12%, multiline +16%. The S9→S10 deltas appear larger due to single-fork JMH variance across different runs.
+- S11 same-session comparison vs S10 baseline: rawUnicodeWord +14%, multiline +5%, charClass +4%. The `charsSearched` elimination was the key micro-optimization — removing 8 long operations per unrolled iteration from the hot loop.

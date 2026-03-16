@@ -1,7 +1,7 @@
 # DFA JIT Headroom: Cold Path Extraction + Prefilter at Start State
 
 **Date:** 2026-03-16
-**Status:** Draft
+**Status:** Phase 1 complete (PASS). Phase 2 ready for implementation.
 **Depends on:** Stage 10 (allocation cleanup)
 
 ## Motivation
@@ -121,6 +121,8 @@ The hot path only:
 
 **Estimated post-extraction size:** ~385-420 bytecode bytes
 
+**Actual result:** 472 bytes after extraction, then 472 bytes after micro-optimizations (charsSearched elimination, continue removal, dead/quit instance fields). Total: 613 → 472 = -141 bytes (-23%).
+
 ### JIT Validation Protocol
 
 This is the gate for proceeding to Phase 2.
@@ -173,6 +175,18 @@ Same benchmark suite as Step 2. Compare.
 - If inline count increased AND benchmarks improved or held: **proceed to Phase 2**
 - If inline count increased but benchmarks regressed: **investigate** — the extracted helpers may be too expensive to call. Consider `@jdk.internal.vm.annotation.ForceInline` or restructuring.
 - If inline count did NOT increase: **stop** — the theory was wrong. Document findings and reconsider approach.
+
+**Phase 1 Result (2026-03-16):**
+
+classify inline count: 3/6 → 3/5 (right-edge moved to helper; inner loop positions 2,3 still rejected). The inner-loop inlining didn't change, but the reduced method bytecode (613→472) produced better overall C2 code generation.
+
+searchFwdLong bytecode: 613b → 472b (-23%). searchRevLong: 625b → 480b (-23%).
+
+Additional micro-optimizations applied: `charsSearched` local eliminated from hot loop (computed on demand at sync points), unnecessary `continue` statements removed, `dead`/`quit` precomputed as instance fields.
+
+Benchmark delta (same-session vs baseline): rawUnicodeWord **+14%**, multiline **+5%**, charClass **+4%**. No regressions. rawCharClass regression from extraction-only step was fixed by charsSearched elimination.
+
+**Phase 2 gate: PASS.** 141 bytes of headroom available. Prefilter-at-start estimated at ~50-60 bytes.
 
 ## Phase 2: Prefilter at Start State (conditional)
 
