@@ -29,16 +29,19 @@ class DenseDFABuilderTest {
     }
 
     @Test
-    void buildReturnsNullForLookAssertions() {
+    void buildReturnsNullForQuitCharPatterns() {
+        // Patterns with quit chars (e.g., Unicode word boundaries) are rejected
+        // because the dense DFA can't handle all inputs correctly.
         DenseDFA dfa = buildDenseWithQuit("\\bword\\b");
-        assertNull(dfa, "pattern with word boundaries should return null");
+        assertNull(dfa, "pattern with quit chars should return null");
     }
 
     @Test
-    void buildReturnsNullForMultilineAnchors() {
+    void buildSucceedsForMultilineAnchors() {
         // (?m)^line$ uses START_LINE and END_LINE look-assertions
+        // With multi-position start states, these patterns can now build dense DFAs
         DenseDFA dfa = buildDense("(?m)^line$");
-        assertNull(dfa, "pattern with multiline anchors should return null");
+        assertNotNull(dfa, "pattern with multiline anchors should now produce a DenseDFA");
     }
 
     @Test
@@ -90,26 +93,35 @@ class DenseDFABuilderTest {
         DenseDFA dfa = buildDense("abc");
         assertNotNull(dfa);
         int stride = dfa.stride();
-        // Start states should not be padding (0)
-        assertTrue(dfa.startAnchored() > 0, "anchored start should be > 0");
-        assertTrue(dfa.startUnanchored() > 0, "unanchored start should be > 0");
-        // Start states should be valid state IDs (multiples of stride)
-        assertEquals(0, dfa.startAnchored() % stride,
-                "anchored start should be a multiple of stride");
-        assertEquals(0, dfa.startUnanchored() % stride,
-                "unanchored start should be a multiple of stride");
+        int[] starts = dfa.startStates();
+        // Should have Start.COUNT * 2 start states
+        assertEquals(lol.ohai.regex.automata.dfa.lazy.Start.COUNT * 2, starts.length);
+        for (int i = 0; i < starts.length; i++) {
+            assertTrue(starts[i] > 0, "start state [" + i + "] should be > 0");
+            assertEquals(0, starts[i] % stride,
+                    "start state [" + i + "] should be a multiple of stride");
+        }
     }
 
     @Test
-    void noMatchFlagBitsInTransitions() {
-        // Verify that MATCH_FLAG (0x8000_0000) has been stripped from all transitions
+    void matchFlagPreservedOnTransitions() {
+        // MATCH_FLAG (0x8000_0000) is preserved on transitions for delayed-match
+        // detection. Verify that at least some transitions from match states have
+        // MATCH_FLAG, and that stripping the flag gives valid state IDs.
         DenseDFA dfa = buildDense("[a-z]+");
         assertNotNull(dfa);
         int[] table = dfa.transTable();
+        int stride = dfa.stride();
+        boolean hasMatchFlag = false;
         for (int i = 0; i < table.length; i++) {
-            assertEquals(0, table[i] & 0x8000_0000,
-                    "transition at index " + i + " still has MATCH_FLAG set");
+            if ((table[i] & 0x8000_0000) != 0) {
+                hasMatchFlag = true;
+                int rawTarget = table[i] & 0x7FFF_FFFF;
+                assertEquals(0, rawTarget % stride,
+                        "MATCH_FLAG transition at " + i + " has invalid raw target");
+            }
         }
+        assertTrue(hasMatchFlag, "[a-z]+ should have MATCH_FLAG transitions from match states");
     }
 
     @Test

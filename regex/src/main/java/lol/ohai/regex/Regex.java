@@ -116,7 +116,7 @@ public final class Regex {
                     onePassDFA = OnePassBuilder.build(nfa, charClasses);
                 }
 
-                // Build dense DFA for patterns without look-assertions
+                // Build dense DFA (supports look-assertions via multi-position start states)
                 DenseDFA denseDFA = charClasses != null
                         ? new DenseDFABuilder().build(nfa, charClasses) : null;
 

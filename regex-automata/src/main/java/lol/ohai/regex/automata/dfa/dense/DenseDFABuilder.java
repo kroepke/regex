@@ -3,6 +3,7 @@ package lol.ohai.regex.automata.dfa.dense;
 import lol.ohai.regex.automata.dfa.CharClasses;
 import lol.ohai.regex.automata.dfa.lazy.DFACache;
 import lol.ohai.regex.automata.dfa.lazy.LazyDFA;
+import lol.ohai.regex.automata.dfa.lazy.Start;
 import lol.ohai.regex.automata.nfa.thompson.NFA;
 import lol.ohai.regex.automata.util.Input;
 
@@ -25,8 +26,7 @@ import java.util.Deque;
  *   <li>Remaps all transition targets and strips MATCH_FLAG</li>
  * </ol>
  *
- * <p>Returns {@code null} if the pattern uses look-assertions (Spec 1
- * limitation) or exceeds the state limit.</p>
+ * <p>Returns {@code null} if the pattern exceeds the state limit.</p>
  *
  * <p>Ref: upstream/regex/regex-automata/src/dfa/determinize/mod.rs:60-200</p>
  */
@@ -51,8 +51,11 @@ public final class DenseDFABuilder {
      *         or exceeds the state limit
      */
     public DenseDFA build(NFA nfa, CharClasses charClasses) {
-        // Spec 1 limitation: no look-assertions
-        if (!nfa.lookSetAny().isEmpty()) {
+        // Don't build dense DFA when char classes have quit chars (e.g., Unicode
+        // word boundaries). Quit-char patterns can't handle all inputs in the DFA
+        // and require frequent fallback to the lazy DFA, so the dense DFA provides
+        // minimal benefit while risking edge-case correctness issues.
+        if (charClasses.hasQuitClasses()) {
             return null;
         }
 
@@ -68,12 +71,20 @@ public final class DenseDFABuilder {
         // Use a large cache capacity so it doesn't clear/give-up during build
         DFACache cache = new DFACache(charClasses, maxBytes, nfa.stateCount());
 
-        // Compute start states. Content doesn't matter since lookSetAny is empty.
-        Input unanchoredInput = Input.of("x");
-        Input anchoredInput = Input.anchored("x");
-
-        int startUnanchored = lazyDFA.getOrComputeStartState(unanchoredInput, cache);
-        int startAnchored = lazyDFA.getOrComputeStartState(anchoredInput, cache);
+        // Compute all 10 start states (5 Start variants × anchored/unanchored).
+        // Each Start variant requires a synthetic Input whose haystack and start
+        // position produce the correct look-behind context.
+        // Ref: upstream/regex/regex-automata/src/util/start.rs:141-158
+        int[] startStates = new int[Start.COUNT * 2];
+        for (Start start : Start.values()) {
+            for (int a = 0; a < 2; a++) {
+                boolean anchored = (a == 1);
+                Input syntheticInput = createSyntheticInput(start, anchored);
+                int sid = lazyDFA.getOrComputeStartState(syntheticInput, cache);
+                int idx = anchored ? Start.COUNT + start.ordinal() : start.ordinal();
+                startStates[idx] = sid;
+            }
+        }
 
         // Worklist-driven exploration of all reachable states
         // Track which raw state IDs have been enqueued
@@ -83,9 +94,10 @@ public final class DenseDFABuilder {
         boolean[] enqueued = new boolean[maxStates + 1];
         Deque<Integer> worklist = new ArrayDeque<>();
 
-        // Enqueue start states (they may be the same state)
-        enqueueState(worklist, enqueued, startUnanchored, dead, quit, stride);
-        enqueueState(worklist, enqueued, startAnchored, dead, quit, stride);
+        // Enqueue all start states (some may be the same state)
+        for (int sid : startStates) {
+            enqueueState(worklist, enqueued, sid, dead, quit, stride);
+        }
 
         while (!worklist.isEmpty()) {
             int sid = worklist.poll();
@@ -119,8 +131,34 @@ public final class DenseDFABuilder {
         }
 
         // Extract into dense table with match-state shuffling
-        return extractDense(cache, charClasses, startAnchored, startUnanchored,
-                dead, quit, stride);
+        return extractDense(cache, charClasses, startStates, dead, quit, stride);
+    }
+
+    /**
+     * Creates a synthetic Input that triggers the given Start variant's
+     * look-behind context. Each Start variant depends on the char BEFORE
+     * the search position.
+     */
+    private static Input createSyntheticInput(Start start, boolean anchored) {
+        return switch (start) {
+            case TEXT -> anchored ? Input.anchored("x") : Input.of("x");
+            case LINE_LF -> {
+                Input in = Input.of("\nx", 1, 2);
+                yield anchored ? in.withBounds(1, 2, true) : in;
+            }
+            case LINE_CR -> {
+                Input in = Input.of("\rx", 1, 2);
+                yield anchored ? in.withBounds(1, 2, true) : in;
+            }
+            case WORD_BYTE -> {
+                Input in = Input.of("ax", 1, 2);
+                yield anchored ? in.withBounds(1, 2, true) : in;
+            }
+            case NON_WORD_BYTE -> {
+                Input in = Input.of(" x", 1, 2);
+                yield anchored ? in.withBounds(1, 2, true) : in;
+            }
+        };
     }
 
     /**
@@ -154,17 +192,53 @@ public final class DenseDFABuilder {
      * are remapped and MATCH_FLAG is stripped.</p>
      */
     private static DenseDFA extractDense(DFACache cache, CharClasses charClasses,
-                                          int startAnchored, int startUnanchored,
+                                          int[] startStates,
                                           int dead, int quit, int stride) {
         int totalStates = cache.stateCount(); // includes padding, dead, quit
 
-        // Identify match states (skip index 0 = padding)
+        // Identify match states (skip index 0 = padding).
+        //
+        // A DFA state is a "match state" if the lazy DFA would signal a match
+        // when transitioning FROM it. Two sources of match-ness:
+        //
+        // 1. StateContent.isMatch() — the NFA Match state was reachable during
+        //    epsilon closure at state-creation time (no look-ahead needed).
+        //
+        // 2. MATCH_FLAG on outgoing transitions from look-ahead re-computation —
+        //    for look-assertion patterns (e.g., (?m)^.+$), the Match NFA state
+        //    may NOT be in the closure, but MATCH_FLAG is set on transitions
+        //    where look-ahead resolution makes the match visible (e.g., $ on \n/EOI).
+        //    We detect this by checking if MATCH_FLAG is set on any transition
+        //    whose raw target state is NOT itself a match state (i.e., MATCH_FLAG
+        //    was contributed by the source, not the destination's allocation).
+        //
+        // Ref: computeNextState in LazyDFA.java — isMatch set from source's
+        // State.Match, OR'd onto the returned sid after allocation.
         boolean[] isMatch = new boolean[totalStates];
         int matchCount = 0;
         for (int i = 3; i < totalStates; i++) { // skip padding(0), dead(1), quit(2)
-            if (cache.getState(i * stride).isMatch()) {
+            int rawSid = i * stride;
+            // Check 1: unconditional match from epsilon closure
+            if (cache.getState(rawSid).isMatch()) {
                 isMatch[i] = true;
                 matchCount++;
+                continue;
+            }
+            // Check 2: conditional match from look-ahead re-computation
+            // Scan outgoing transitions for MATCH_FLAG that wasn't set by dest
+            for (int cls = 0; cls <= charClasses.classCount(); cls++) {
+                int trans = cache.nextState(rawSid, cls);
+                if ((trans & DFACache.MATCH_FLAG) != 0) {
+                    int rawTarget = trans & 0x7FFF_FFFF;
+                    int targetIdx = rawTarget / stride;
+                    // If the destination is dead, quit, or its StateContent is
+                    // NOT a match state, then MATCH_FLAG came from the source.
+                    if (targetIdx < 3 || !cache.getState(rawTarget).isMatch()) {
+                        isMatch[i] = true;
+                        matchCount++;
+                        break;
+                    }
+                }
             }
         }
 
@@ -206,7 +280,9 @@ public final class DenseDFABuilder {
             newTable[newQuit + cls] = newQuit;
         }
 
-        // Copy real states (index 3+)
+        // Copy real states (index 3+), preserving MATCH_FLAG on transitions.
+        // MATCH_FLAG (0x8000_0000) on a transition means "the source state
+        // was a match state" — the delayed-match signal used by the search loop.
         for (int i = 3; i < totalStates; i++) {
             int oldRawSid = i * stride;
             int newSid = remap[i];
@@ -214,13 +290,14 @@ public final class DenseDFABuilder {
             for (int cls = 0; cls <= charClasses.classCount(); cls++) {
                 int target = cache.nextState(oldRawSid, cls);
 
-                // Strip MATCH_FLAG from target
+                // Separate MATCH_FLAG from raw target
+                int matchFlag = target & DFACache.MATCH_FLAG;
                 int rawTarget = target & 0x7FFF_FFFF;
 
-                // Remap target to new state ID
+                // Remap target to new state ID, preserving MATCH_FLAG
                 int targetIdx = rawTarget / stride;
                 if (targetIdx < totalStates) {
-                    newTable[newSid + cls] = remap[targetIdx];
+                    newTable[newSid + cls] = remap[targetIdx] | matchFlag;
                 } else {
                     // Unknown/uncomputed transition — should not happen after
                     // full worklist exploration; map to dead as safety
@@ -229,14 +306,18 @@ public final class DenseDFABuilder {
             }
         }
 
-        // Remap start states
-        int rawStartAnchored = startAnchored & 0x7FFF_FFFF;
-        int rawStartUnanchored = startUnanchored & 0x7FFF_FFFF;
-        int newStartAnchored = remap[rawStartAnchored / stride];
-        int newStartUnanchored = remap[rawStartUnanchored / stride];
+        // Remap all 10 start states
+        int[] newStartStates = new int[startStates.length];
+        for (int i = 0; i < startStates.length; i++) {
+            int rawSid = startStates[i] & 0x7FFF_FFFF;
+            int stateIdx = rawSid / stride;
+            newStartStates[i] = (stateIdx < remap.length) ? remap[stateIdx] : rawSid;
+        }
 
         // Acceleration analysis: find states where most transitions self-loop
         // and ≤3 equivalence classes escape. Build boolean[128] escape tables.
+        // Since transitions may carry MATCH_FLAG, we strip it before comparing
+        // the raw target to the state ID for self-loop detection.
         // Ref: upstream/regex/regex-automata/src/dfa/accel.rs:1-51
         int classCount = charClasses.classCount();  // excludes EOI
         boolean[][] accelTables = new boolean[totalStates][];
@@ -244,11 +325,14 @@ public final class DenseDFABuilder {
             int sid = i * stride;
             if (sid == newDead || sid == newQuit || i == 0) continue;  // skip padding/dead/quit
 
-            // Count non-self-loop transitions (escape classes), excluding EOI
+            // Count non-self-loop transitions (escape classes), excluding EOI.
+            // Strip MATCH_FLAG before comparing: a transition that self-loops
+            // WITH MATCH_FLAG is still a self-loop for acceleration purposes.
             int escapes = 0;
             boolean tooMany = false;
             for (int cls = 0; cls < classCount; cls++) {
-                if (newTable[sid + cls] != sid) {
+                int rawTarget = newTable[sid + cls] & 0x7FFF_FFFF;
+                if (rawTarget != sid) {
                     escapes++;
                     if (escapes > 3) { tooMany = true; break; }
                 }
@@ -259,7 +343,8 @@ public final class DenseDFABuilder {
                 boolean[] table = new boolean[128];
                 for (int c = 0; c < 128; c++) {
                     int cls = charClasses.classify((char) c);
-                    if (newTable[sid + cls] != sid) {
+                    int rawTarget = newTable[sid + cls] & 0x7FFF_FFFF;
+                    if (rawTarget != sid) {
                         table[c] = true;
                     }
                 }
@@ -268,7 +353,7 @@ public final class DenseDFABuilder {
         }
 
         return new DenseDFA(newTable, charClasses,
-                newStartAnchored, newStartUnanchored,
+                newStartStates,
                 minMatchState, newDead, newQuit, totalStates, accelTables);
     }
 }

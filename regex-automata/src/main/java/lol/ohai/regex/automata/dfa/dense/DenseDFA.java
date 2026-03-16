@@ -2,6 +2,7 @@ package lol.ohai.regex.automata.dfa.dense;
 
 import lol.ohai.regex.automata.dfa.CharClasses;
 import lol.ohai.regex.automata.dfa.lazy.SearchResult;
+import lol.ohai.regex.automata.dfa.lazy.Start;
 import lol.ohai.regex.automata.util.Input;
 
 /**
@@ -9,9 +10,15 @@ import lol.ohai.regex.automata.util.Input;
  * at build time.
  *
  * <p>The transition table is a flat {@code int[]} array indexed by
- * {@code stateId + classId}. Match states are shuffled to a contiguous
- * range at the end of the table, so match detection is a simple
- * {@code sid >= minMatchState} comparison (no flag bits needed).</p>
+ * {@code stateId + classId}. Transitions preserve MATCH_FLAG (0x8000_0000)
+ * from the lazy DFA, which signals "the source state was a match state
+ * (delayed match)." Match detection in the search loop uses this flag,
+ * matching the lazy DFA's semantics exactly.</p>
+ *
+ * <p>Match states are also shuffled to a contiguous range at the end of
+ * the table (sid >= minMatchState) for fast range-check detection of
+ * unconditional match states. For patterns with look-assertions, the
+ * MATCH_FLAG-based check is essential for correctness.</p>
  *
  * <p>Dead and quit sentinel states are preserved at their fixed positions
  * ({@code stride} and {@code stride * 2} respectively), matching the layout
@@ -22,8 +29,8 @@ import lol.ohai.regex.automata.util.Input;
 public final class DenseDFA {
     private final int[] transTable;
     private final CharClasses charClasses;
-    private final int startAnchored;
-    private final int startUnanchored;
+    /** Start states: [0..COUNT-1] = unanchored, [COUNT..2*COUNT-1] = anchored. */
+    private final int[] startStates;
     private final int minMatchState;  // states >= this are match states
     private final int dead;
     private final int quit;
@@ -32,13 +39,12 @@ public final class DenseDFA {
     private final boolean[][] accelTables;  // indexed by sid / stride; null entry = not accelerated
 
     DenseDFA(int[] transTable, CharClasses charClasses,
-             int startAnchored, int startUnanchored,
+             int[] startStates,
              int minMatchState, int dead, int quit, int stateCount,
              boolean[][] accelTables) {
         this.transTable = transTable;
         this.charClasses = charClasses;
-        this.startAnchored = startAnchored;
-        this.startUnanchored = startUnanchored;
+        this.startStates = startStates;
         this.minMatchState = minMatchState;
         this.dead = dead;
         this.quit = quit;
@@ -57,17 +63,27 @@ public final class DenseDFA {
         return false;
     }
 
-    /** Returns the flat transition table. Package-private for searchFwd. */
+    /** Returns the flat transition table. Package-private for testing. */
     int[] transTable() { return transTable; }
 
     /** Returns the char classes used for input classification. */
     public CharClasses charClasses() { return charClasses; }
 
-    /** Returns the anchored start state ID. */
-    public int startAnchored() { return startAnchored; }
+    /** Returns the start states array (package-private for testing). */
+    int[] startStates() { return startStates; }
 
-    /** Returns the unanchored start state ID. */
-    public int startUnanchored() { return startUnanchored; }
+    /**
+     * Selects the correct start state based on the input's position context
+     * and anchored flag. Uses {@link Start#from} to classify the look-behind
+     * context at the search start position.
+     *
+     * <p>Ref: upstream/regex/regex-automata/src/util/start.rs:141-158</p>
+     */
+    private int startState(Input input) {
+        Start start = Start.from(input.haystack(), input.start());
+        int idx = input.isAnchored() ? Start.COUNT + start.ordinal() : start.ordinal();
+        return startStates[idx];
+    }
 
     /** Returns the total number of states (including dead and quit). */
     public int stateCount() { return stateCount; }
@@ -97,17 +113,14 @@ public final class DenseDFA {
     /**
      * Forward search for the end position of the leftmost-first match.
      *
-     * <p>All transitions are pre-computed in the flat {@code transTable}, so there
-     * are no UNKNOWN transitions and no {@code computeNextState} calls. Match
-     * states are detected by {@code sid >= minMatchState} range check.</p>
+     * <p>All transitions are pre-computed in the flat {@code transTable}, so
+     * there are no UNKNOWN transitions and no {@code computeNextState} calls.
+     * Transitions preserve MATCH_FLAG from the lazy DFA: when a transition
+     * result has the high bit set (negative as signed int), the SOURCE state
+     * was a match state and we record a match at the current position.</p>
      *
-     * <p>Matches are delayed by one character, matching the lazy DFA semantics:
-     * when we transition INTO a match state, the match end position is the
-     * current {@code pos} (already one past the last char consumed). This
-     * is equivalent to upstream's pattern of recording {@code at} before
-     * incrementing it.</p>
-     *
-     * <p>Ref: upstream/regex/regex-automata/src/dfa/search.rs:45-186</p>
+     * <p>This exactly mirrors the lazy DFA's delayed-match semantics.
+     * Ref: upstream/regex/regex-automata/src/dfa/search.rs:45-186</p>
      *
      * @param input the search input (haystack + bounds + anchored flag)
      * @return primitive-encoded search result; decode with {@link SearchResult}
@@ -117,100 +130,79 @@ public final class DenseDFA {
         int at = input.start();
         final int end = input.end();
 
-        int sid = input.isAnchored() ? startAnchored : startUnanchored;
+        int sid = startState(input);
         if (sid == dead) return SearchResult.NO_MATCH;
 
         final int[] tt = transTable;
         final CharClasses cc = charClasses;
-        final int mms = minMatchState;
         final int d = dead;
         final int q = quit;
 
         int lastMatchEnd = -1;
 
-        // Check if the start state itself is a match state (empty-match patterns).
-        // This must happen before taking any transition, matching the lazy DFA's
-        // behavior where right-edge handling picks this up when at == end.
-        // For non-empty haystacks, we still need to enter the loop to find longer
-        // matches, but we record the start position as a potential match.
-        if (sid >= mms) {
-            lastMatchEnd = at;
-        }
-
-        // Main search loop. Follows upstream pattern: take transition, then
-        // check for special state, then advance position.
-        // Ref: upstream/regex/regex-automata/src/dfa/search.rs:83-183
+        // Main search loop. Transitions may carry MATCH_FLAG (negative as signed int).
+        // The inner unrolled loop stays in the fast path for non-special transitions
+        // (nextSid > quit and nextSid >= 0). Any special condition breaks out.
         final boolean[][] accel = accelTables;
         while (at < end) {
             // Acceleration: fast-scan self-looping states.
-            // States where most transitions self-loop and ≤3 equivalence classes
-            // escape get a boolean[128] table. We scan with 1 array load per char
-            // instead of 2 (classify + transTable lookup).
-            // Ref: upstream/regex/regex-automata/src/dfa/accel.rs:1-51
+            // Self-loop transitions don't change the DFA state, so we scan
+            // until an escape char (non-self-loop) is found. Match recording
+            // is deferred to the dispatch after the escape transition, or to
+            // handleRightEdge if we scan to the end.
             boolean[] escTable = accel[sid / stride];
             if (escTable != null) {
-                // If also a match state, record match at entry
-                if (sid >= mms) {
-                    lastMatchEnd = at;
-                }
                 // Scan: 1 array load per char
                 while (at < end) {
                     char c = haystack[at];
                     if (c >= 128 || escTable[c]) break;
                     at++;
                 }
-                // After scan: if match state, update to final pos
-                if (sid >= mms) {
-                    lastMatchEnd = at;
-                }
                 if (at >= end) break;
             }
 
             // Inner 4x unrolled loop. Takes a transition and immediately checks
-            // the result. Breaks out on special states (dead, quit, match).
-            // The check `at + 3 >= end` ensures we break to the outer dispatch
-            // when fewer than 4 chars remain, so we get correct match recording.
-            //
-            // Unlike the lazy DFA, we check BOTH <= quit (dead/quit) and
-            // >= minMatchState (match) as break conditions.
+            // the result. Breaks out on special states:
+            //   - nextSid < 0: MATCH_FLAG set (delayed match from source state)
+            //   - nextSid <= quit: dead or quit
+            //   - at + 3 >= end: need to switch to single-step for correct EOI
             while (at < end) {
                 sid = tt[sid + cc.classify(haystack[at])];
-                if (sid <= q || sid >= mms || at + 3 >= end) { break; }
+                if (sid < 0 || sid <= q || at + 3 >= end) { break; }
                 at++;
 
                 sid = tt[sid + cc.classify(haystack[at])];
-                if (sid <= q || sid >= mms) { break; }
+                if (sid < 0 || sid <= q) { break; }
                 at++;
 
                 sid = tt[sid + cc.classify(haystack[at])];
-                if (sid <= q || sid >= mms) { break; }
+                if (sid < 0 || sid <= q) { break; }
                 at++;
 
                 sid = tt[sid + cc.classify(haystack[at])];
-                if (sid <= q || sid >= mms) { break; }
+                if (sid < 0 || sid <= q) { break; }
                 at++;
             }
 
             // Dispatch on the current state (result of the last transition).
-            // Ref: upstream/regex/regex-automata/src/dfa/search.rs:125-181
-            if (sid >= mms) {
-                // Match state: record match end position (exclusive).
-                // `at` is the position of the char just consumed. The match
-                // extends through this position, so the exclusive end is at+1.
-                // This aligns with the lazy DFA convention where lastMatchEnd
-                // is the exclusive end of the match.
-                lastMatchEnd = at + 1;
+            if (sid < 0) {
+                // MATCH_FLAG set: the source state was a match state.
+                // Record match at current position (delayed match).
+                lastMatchEnd = at;
+                sid = sid & 0x7FFF_FFFF; // strip MATCH_FLAG
+                at++;
             } else if (sid == d) {
                 break;
             } else if (sid == q) {
                 return SearchResult.gaveUp(at);
+            } else {
+                at++;
             }
-            at++;
         }
 
         // Right-edge transition: handle EOI or char just past the search span
         // for correct look-ahead context ($ and \b assertions).
-        // Ref: upstream/regex/regex-automata/src/dfa/search.rs:184 (eoi_fwd)
+        // Ref: upstream/regex/regex-automata/src/dfa/search.rs:576-602 (eoi_fwd)
         lastMatchEnd = handleRightEdge(sid, haystack, end, lastMatchEnd);
 
         if (lastMatchEnd >= 0) return SearchResult.match(lastMatchEnd);
@@ -220,32 +212,28 @@ public final class DenseDFA {
     /**
      * Process the right-edge transition after the forward search main loop.
      *
-     * <p>In the dense DFA, match-flagged transitions to dead (e.g., EOI from
-     * a match state) have their MATCH_FLAG stripped during table construction.
-     * So we detect the match by checking if the CURRENT state is a match state
-     * before taking the right-edge transition. If the current state is a match
-     * state, the match end is {@code end}. We also check the EOI destination
-     * in case it leads to another match state (unusual but possible).</p>
+     * <p>Takes the EOI or right-context transition from the current state.
+     * If the transition has MATCH_FLAG set (negative as signed int), the
+     * current state was a match state and the match is confirmed by the
+     * right-edge context (EOI or look-ahead char). This is the delayed-match
+     * pattern: the match is one transition behind.</p>
+     *
+     * <p>Ref: upstream/regex/regex-automata/src/dfa/search.rs:576-602</p>
      *
      * @return updated lastMatchEnd (-1 if no match)
      */
     private int handleRightEdge(int sid, char[] haystack, int end,
                                  int lastMatchEnd) {
         if (sid != dead && sid != quit) {
-            // Check if the current state is a match state — this captures
-            // the delayed match that would be signaled by MATCH_FLAG on the
-            // transition target in the lazy DFA.
-            if (sid >= minMatchState) {
-                lastMatchEnd = end;
-            }
-            // Also take the right-edge transition to check for EOI matches.
             int rightEdgeSid;
             if (end < haystack.length) {
                 rightEdgeSid = transTable[sid + charClasses.classify(haystack[end])];
             } else {
                 rightEdgeSid = transTable[sid + charClasses.eoiClass()];
             }
-            if (rightEdgeSid >= minMatchState) {
+            // MATCH_FLAG on the right-edge transition signals a delayed match
+            // from the current state (look-ahead resolved at EOI/right-context).
+            if (rightEdgeSid < 0) {
                 return end;
             }
         }
