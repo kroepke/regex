@@ -235,8 +235,40 @@ public final class DenseDFABuilder {
         int newStartAnchored = remap[rawStartAnchored / stride];
         int newStartUnanchored = remap[rawStartUnanchored / stride];
 
+        // Acceleration analysis: find states where most transitions self-loop
+        // and ≤3 equivalence classes escape. Build boolean[128] escape tables.
+        // Ref: upstream/regex/regex-automata/src/dfa/accel.rs:1-51
+        int classCount = charClasses.classCount();  // excludes EOI
+        boolean[][] accelTables = new boolean[totalStates][];
+        for (int i = 0; i < totalStates; i++) {
+            int sid = i * stride;
+            if (sid == newDead || sid == newQuit || i == 0) continue;  // skip padding/dead/quit
+
+            // Count non-self-loop transitions (escape classes), excluding EOI
+            int escapes = 0;
+            boolean tooMany = false;
+            for (int cls = 0; cls < classCount; cls++) {
+                if (newTable[sid + cls] != sid) {
+                    escapes++;
+                    if (escapes > 3) { tooMany = true; break; }
+                }
+            }
+
+            if (!tooMany) {
+                // Build boolean[128] escape table
+                boolean[] table = new boolean[128];
+                for (int c = 0; c < 128; c++) {
+                    int cls = charClasses.classify((char) c);
+                    if (newTable[sid + cls] != sid) {
+                        table[c] = true;
+                    }
+                }
+                accelTables[i] = table;
+            }
+        }
+
         return new DenseDFA(newTable, charClasses,
                 newStartAnchored, newStartUnanchored,
-                minMatchState, newDead, newQuit, totalStates);
+                minMatchState, newDead, newQuit, totalStates, accelTables);
     }
 }

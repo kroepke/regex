@@ -29,10 +29,12 @@ public final class DenseDFA {
     private final int quit;
     private final int stateCount;
     private final int stride;
+    private final boolean[][] accelTables;  // indexed by sid / stride; null entry = not accelerated
 
     DenseDFA(int[] transTable, CharClasses charClasses,
              int startAnchored, int startUnanchored,
-             int minMatchState, int dead, int quit, int stateCount) {
+             int minMatchState, int dead, int quit, int stateCount,
+             boolean[][] accelTables) {
         this.transTable = transTable;
         this.charClasses = charClasses;
         this.startAnchored = startAnchored;
@@ -42,6 +44,17 @@ public final class DenseDFA {
         this.quit = quit;
         this.stateCount = stateCount;
         this.stride = charClasses.stride();
+        this.accelTables = accelTables;
+    }
+
+    /**
+     * Returns true if at least one state has an acceleration table.
+     */
+    public boolean hasAcceleratedStates() {
+        for (boolean[] t : accelTables) {
+            if (t != null) return true;
+        }
+        return false;
     }
 
     /** Returns the flat transition table. Package-private for searchFwd. */
@@ -127,7 +140,32 @@ public final class DenseDFA {
         // Main search loop. Follows upstream pattern: take transition, then
         // check for special state, then advance position.
         // Ref: upstream/regex/regex-automata/src/dfa/search.rs:83-183
+        final boolean[][] accel = accelTables;
         while (at < end) {
+            // Acceleration: fast-scan self-looping states.
+            // States where most transitions self-loop and ≤3 equivalence classes
+            // escape get a boolean[128] table. We scan with 1 array load per char
+            // instead of 2 (classify + transTable lookup).
+            // Ref: upstream/regex/regex-automata/src/dfa/accel.rs:1-51
+            boolean[] escTable = accel[sid / stride];
+            if (escTable != null) {
+                // If also a match state, record match at entry
+                if (sid >= mms) {
+                    lastMatchEnd = at;
+                }
+                // Scan: 1 array load per char
+                while (at < end) {
+                    char c = haystack[at];
+                    if (c >= 128 || escTable[c]) break;
+                    at++;
+                }
+                // After scan: if match state, update to final pos
+                if (sid >= mms) {
+                    lastMatchEnd = at;
+                }
+                if (at >= end) break;
+            }
+
             // Inner 4x unrolled loop. Takes a transition and immediately checks
             // the result. Breaks out on special states (dead, quit, match).
             // The check `at + 3 >= end` ensures we break to the outer dispatch
