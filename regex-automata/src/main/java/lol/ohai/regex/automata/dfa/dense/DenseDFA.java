@@ -115,6 +115,15 @@ public final class DenseDFA {
 
         int lastMatchEnd = -1;
 
+        // Check if the start state itself is a match state (empty-match patterns).
+        // This must happen before taking any transition, matching the lazy DFA's
+        // behavior where right-edge handling picks this up when at == end.
+        // For non-empty haystacks, we still need to enter the loop to find longer
+        // matches, but we record the start position as a potential match.
+        if (sid >= mms) {
+            lastMatchEnd = at;
+        }
+
         // Main search loop. Follows upstream pattern: take transition, then
         // check for special state, then advance position.
         // Ref: upstream/regex/regex-automata/src/dfa/search.rs:83-183

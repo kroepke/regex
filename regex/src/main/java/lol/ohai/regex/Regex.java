@@ -6,6 +6,8 @@ import lol.ohai.regex.automata.meta.SingleLiteral;
 import lol.ohai.regex.automata.meta.Strategy;
 import lol.ohai.regex.automata.dfa.CharClassBuilder;
 import lol.ohai.regex.automata.dfa.CharClasses;
+import lol.ohai.regex.automata.dfa.dense.DenseDFA;
+import lol.ohai.regex.automata.dfa.dense.DenseDFABuilder;
 import lol.ohai.regex.automata.dfa.lazy.LazyDFA;
 import lol.ohai.regex.automata.dfa.onepass.OnePassBuilder;
 import lol.ohai.regex.automata.dfa.onepass.OnePassDFA;
@@ -114,6 +116,10 @@ public final class Regex {
                     onePassDFA = OnePassBuilder.build(nfa, charClasses);
                 }
 
+                // Build dense DFA for patterns without look-assertions
+                DenseDFA denseDFA = charClasses != null
+                        ? new DenseDFABuilder().build(nfa, charClasses) : null;
+
                 // Try ReverseSuffix: no prefix prefilter, but suffix available + both DFAs
                 if (prefilter == null && forwardDFA != null && reverseDFA != null) {
                     LiteralSeq suffixes = LiteralExtractor.extractSuffixes(hir);
@@ -157,7 +163,7 @@ public final class Regex {
                     }
                 }
 
-                strategy = new Strategy.Core(pikeVM, forwardDFA, reverseDFA, prefilter, backtracker, onePassDFA);
+                strategy = new Strategy.Core(pikeVM, forwardDFA, reverseDFA, prefilter, backtracker, onePassDFA, denseDFA);
                 namedGroups = buildNamedGroupMap(nfa);
             }
 

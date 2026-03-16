@@ -82,7 +82,7 @@ class StrategyTest {
     void coreWithPrefilterFindsMatch() {
         var pikeVM = compilePikeVM("hello\\w+");
         var pf = new SingleLiteral("hello".toCharArray());
-        var strategy = new Strategy.Core(pikeVM, null, null, pf, null, null);
+        var strategy = new Strategy.Core(pikeVM, null, null, pf, null, null, null);
         var cache = strategy.createCache();
 
         var caps = strategy.search(Input.of("say helloWorld"), cache);
@@ -95,7 +95,7 @@ class StrategyTest {
     void coreWithPrefilterSkipsFalsePositive() {
         var pikeVM = compilePikeVM("hello world");
         var pf = new SingleLiteral("hello".toCharArray());
-        var strategy = new Strategy.Core(pikeVM, null, null, pf, null, null);
+        var strategy = new Strategy.Core(pikeVM, null, null, pf, null, null, null);
         var cache = strategy.createCache();
 
         var caps = strategy.search(Input.of("hello there hello world"), cache);
@@ -108,7 +108,7 @@ class StrategyTest {
     void coreWithPrefilterReturnsNullOnNoMatch() {
         var pikeVM = compilePikeVM("hello world");
         var pf = new SingleLiteral("hello".toCharArray());
-        var strategy = new Strategy.Core(pikeVM, null, null, pf, null, null);
+        var strategy = new Strategy.Core(pikeVM, null, null, pf, null, null, null);
         var cache = strategy.createCache();
 
         assertNull(strategy.search(Input.of("hello there"), cache));
@@ -117,7 +117,7 @@ class StrategyTest {
     @Test
     void coreWithoutPrefilterFallsThroughToPikeVM() {
         var pikeVM = compilePikeVM("[a-z]+");
-        var strategy = new Strategy.Core(pikeVM, null, null, null, null, null);
+        var strategy = new Strategy.Core(pikeVM, null, null, null, null, null, null);
         var cache = strategy.createCache();
 
         var caps = strategy.search(Input.of("123 abc"), cache);
@@ -129,7 +129,7 @@ class StrategyTest {
     @Test
     void coreSearchCapturesPopulatesGroups() {
         var pikeVM = compilePikeVM("(?P<word>[a-z]+)");
-        var strategy = new Strategy.Core(pikeVM, null, null, null, null, null);
+        var strategy = new Strategy.Core(pikeVM, null, null, null, null, null, null);
         var cache = strategy.createCache();
 
         var caps = strategy.searchCaptures(Input.of("123 abc"), cache);
@@ -152,7 +152,7 @@ class StrategyTest {
         LazyDFA forwardDFA = LazyDFA.create(fwdNfa, fwdClasses);
         LazyDFA reverseDFA = LazyDFA.create(revNfa, revClasses);
 
-        Strategy.Core strategy = new Strategy.Core(pikeVM, forwardDFA, reverseDFA, null, null, null);
+        Strategy.Core strategy = new Strategy.Core(pikeVM, forwardDFA, reverseDFA, null, null, null, null);
         Strategy.Cache cache = strategy.createCache();
 
         Input input = Input.of("123 hello 456");
@@ -170,7 +170,7 @@ class StrategyTest {
         PikeVM pikeVM = new PikeVM(fwdNfa);
         LazyDFA forwardDFA = LazyDFA.create(fwdNfa, fwdClasses);
 
-        Strategy.Core strategy = new Strategy.Core(pikeVM, forwardDFA, null, null, null, null);
+        Strategy.Core strategy = new Strategy.Core(pikeVM, forwardDFA, null, null, null, null, null);
         Strategy.Cache cache = strategy.createCache();
 
         Input input = Input.of("123 hello 456");
@@ -191,7 +191,7 @@ class StrategyTest {
         LazyDFA forwardDFA = LazyDFA.create(fwdNfa, fwdClasses);
         LazyDFA reverseDFA = LazyDFA.create(revNfa, revClasses);
 
-        Strategy.Core strategy = new Strategy.Core(pikeVM, forwardDFA, reverseDFA, null, null, null);
+        Strategy.Core strategy = new Strategy.Core(pikeVM, forwardDFA, reverseDFA, null, null, null, null);
         Strategy.Cache cache = strategy.createCache();
 
         Input input = Input.of("xxx 123-456 yyy");

@@ -1,5 +1,6 @@
 package lol.ohai.regex.automata.meta;
 
+import lol.ohai.regex.automata.dfa.dense.DenseDFA;
 import lol.ohai.regex.automata.dfa.lazy.DFACache;
 import lol.ohai.regex.automata.dfa.lazy.LazyDFA;
 import lol.ohai.regex.automata.dfa.lazy.SearchResult;
@@ -43,7 +44,7 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
      */
     record Core(PikeVM pikeVM, LazyDFA forwardDFA, LazyDFA reverseDFA,
                 Prefilter prefilter, BoundedBacktracker backtracker,
-                OnePassDFA onePassDFA) implements Strategy {
+                OnePassDFA onePassDFA, DenseDFA denseDFA) implements Strategy {
 
         @Override
         public Cache createCache() {
@@ -57,13 +58,30 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
             );
         }
 
+        /**
+         * Forward DFA search preferring the dense DFA when available.
+         * Falls back to lazy DFA on GaveUp, or directly if no dense DFA.
+         */
+        private long forwardDfaSearch(Input input, Cache cache) {
+            if (denseDFA != null) {
+                long result = denseDFA.searchFwd(input);
+                if (!SearchResult.isGaveUp(result)) return result;
+                // Dense DFA gave up (quit chars) — fall back to lazy DFA
+            }
+            if (forwardDFA != null) {
+                return forwardDFA.searchFwdLong(input, cache.forwardDFACache());
+            }
+            // No DFA available — caller will fall back to PikeVM
+            return SearchResult.NO_MATCH;
+        }
+
         @Override
         public boolean isMatch(Input input, Cache cache) {
             if (prefilter != null && !input.isAnchored()) {
                 return isMatchPrefilter(input, cache);
             }
-            if (forwardDFA != null) {
-                long result = forwardDFA.searchFwdLong(input, cache.forwardDFACache());
+            if (denseDFA != null || forwardDFA != null) {
+                long result = forwardDfaSearch(input, cache);
                 if (SearchResult.isMatch(result)) return true;
                 if (SearchResult.isNoMatch(result)) return false;
                 return pikeVM.isMatch(input, cache.pikeVMCache());
@@ -82,11 +100,11 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                     return false;
                 }
                 Input candidateInput = input.withBounds(pos, end, false);
-                if (forwardDFA != null) {
-                    long r = forwardDFA.searchFwdLong(candidateInput, cache.forwardDFACache());
+                if (denseDFA != null || forwardDFA != null) {
+                    long r = forwardDfaSearch(candidateInput, cache);
                     if (SearchResult.isMatch(r)) { return true; }
                     if (SearchResult.isNoMatch(r)) { start = pos + 1; continue; }
-                    // GaveUp
+                    // GaveUp (both dense and lazy failed)
                     if (pikeVM.isMatch(candidateInput, cache.pikeVMCache())) return true;
                     start = pos + 1;
                     continue;
@@ -103,13 +121,13 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
         @Override
         public Captures search(Input input, Cache cache) {
             if (prefilter != null && !input.isAnchored()) {
-                if (forwardDFA != null) {
+                if (denseDFA != null || forwardDFA != null) {
                     return prefilterLoop(input, cache, (in, c) -> dfaSearch(in, c));
                 }
                 return prefilterLoop(input, cache,
                         (in, c) -> pikeVM.search(in, c.pikeVMCache()));
             }
-            if (forwardDFA != null) {
+            if (denseDFA != null || forwardDFA != null) {
                 return dfaSearch(input, cache);
             }
             return pikeVM.search(input, cache.pikeVMCache());
@@ -118,14 +136,14 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
         @Override
         public Captures searchCaptures(Input input, Cache cache) {
             if (prefilter != null && !input.isAnchored()) {
-                if (forwardDFA != null) {
+                if (denseDFA != null || forwardDFA != null) {
                     return prefilterLoop(input, cache,
                             (in, c) -> dfaSearchCaptures(in, c));
                 }
                 return prefilterLoop(input, cache,
                         (in, c) -> pikeVM.searchCaptures(in, c.pikeVMCache()));
             }
-            if (forwardDFA != null) {
+            if (denseDFA != null || forwardDFA != null) {
                 return dfaSearchCaptures(input, cache);
             }
             return pikeVM.searchCaptures(input, cache.pikeVMCache());
@@ -142,7 +160,7 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
          * up (e.g., Unicode word boundaries with quit chars).</p>
          */
         private Captures dfaSearch(Input input, Cache cache) {
-            long fwdResult = forwardDFA.searchFwdLong(input, cache.forwardDFACache());
+            long fwdResult = forwardDfaSearch(input, cache);
             if (SearchResult.isNoMatch(fwdResult)) return null;
             if (SearchResult.isGaveUp(fwdResult)) return pikeVM.search(input, cache.pikeVMCache());
 
@@ -187,7 +205,7 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
          * narrows the window, capture engine runs on the narrow window.
          */
         private Captures dfaSearchCaptures(Input input, Cache cache) {
-            long fwdResult = forwardDFA.searchFwdLong(input, cache.forwardDFACache());
+            long fwdResult = forwardDfaSearch(input, cache);
             if (SearchResult.isNoMatch(fwdResult)) return null;
             if (SearchResult.isGaveUp(fwdResult)) return pikeVM.searchCaptures(input, cache.pikeVMCache());
 

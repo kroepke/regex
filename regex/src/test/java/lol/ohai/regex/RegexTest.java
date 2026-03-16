@@ -219,4 +219,14 @@ class RegexTest {
         String s = m.toString();
         assertTrue(s.contains("3") && s.contains("6"), "toString should include start and end");
     }
+
+    @Test
+    void wordBoundaryPatternWorksWithoutDenseDFA() {
+        // \b has look-assertions → DenseDFA returns null → falls back to lazy DFA
+        Regex re = Regex.compile("\\bword\\b");
+        assertTrue(re.isMatch("a word here"));
+        assertFalse(re.isMatch("awordhere"));
+        Match m = re.find("find the word").orElseThrow();
+        assertEquals("word", m.text());
+    }
 }

@@ -49,7 +49,7 @@ class StrategyProfilingTest {
 
         PikeVM pikeVM = new PikeVM(fwdNfa);
         BoundedBacktracker bt = new BoundedBacktracker(fwdNfa);
-        Strategy strategy = new Strategy.Core(pikeVM, fwdDfa, revDfa, null, bt, null);
+        Strategy strategy = new Strategy.Core(pikeVM, fwdDfa, revDfa, null, bt, null, null);
 
         Input baseInput = Input.of(haystack);
         int end = baseInput.end();
