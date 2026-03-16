@@ -42,11 +42,16 @@ public final class LazyDFA {
     private final NFA nfa;
     private final CharClasses charClasses;
     private final LookSet lookSetAny;
+    private final int dead;
+    private final int quit;
 
     private LazyDFA(NFA nfa, CharClasses charClasses) {
         this.nfa = nfa;
         this.charClasses = charClasses;
         this.lookSetAny = nfa.lookSetAny();
+        int stride = charClasses.stride();
+        this.dead = DFACache.dead(stride);
+        this.quit = DFACache.quit(stride);
     }
 
     /**
@@ -104,16 +109,13 @@ public final class LazyDFA {
         char[] haystack = input.haystack();
         int pos = input.start();
         int end = input.end();
-        int stride = charClasses.stride();
-        int dead = DFACache.dead(stride);
-        int quit = DFACache.quit(stride);
 
         int sid = getOrComputeStartState(input, cache);
         if (sid == dead) return SearchResult.NO_MATCH;
         if (sid == quit) return SearchResult.gaveUp(pos);
 
         int lastMatchEnd = -1;
-        long charsSearched = cache.charsSearched;
+        int startPos = pos;
 
         while (pos < end) {
             // Inner unrolled loop: process 4 transitions per iteration.
@@ -125,18 +127,16 @@ public final class LazyDFA {
                 if (s0 <= quit) { break; }
 
                 int s1 = cache.nextState(s0, charClasses.classify(haystack[pos + 1]));
-                if (s1 <= quit) { sid = s0; pos++; charsSearched++; break; }
+                if (s1 <= quit) { sid = s0; pos++; break; }
 
                 int s2 = cache.nextState(s1, charClasses.classify(haystack[pos + 2]));
-                if (s2 <= quit) { sid = s1; pos += 2; charsSearched += 2; break; }
+                if (s2 <= quit) { sid = s1; pos += 2; break; }
 
                 int s3 = cache.nextState(s2, charClasses.classify(haystack[pos + 3]));
-                if (s3 <= quit) { sid = s2; pos += 3; charsSearched += 3; break; }
+                if (s3 <= quit) { sid = s2; pos += 3; break; }
 
                 sid = s3;
                 pos += 4;
-                charsSearched += 4;
-                continue;
             }
 
             // Outer dispatch: handle the char at pos (either a break-out from the inner
@@ -149,35 +149,30 @@ public final class LazyDFA {
             if (nextSid > quit) {
                 sid = nextSid;
                 pos++;
-                charsSearched++;
-                continue;
-            }
-
-            if (nextSid < 0) {
+            } else if (nextSid < 0) {
                 lastMatchEnd = pos;
                 sid = nextSid & 0x7FFF_FFFF;
                 pos++;
-                charsSearched++;
-                continue;
+            } else {
+                // Slow path: sync charsSearched then delegate to helper
+                cache.charsSearched += (pos - startPos);
+                startPos = pos;
+                long slowResult = handleSlowTransition(cache, sid, classId,
+                        nextSid, haystack[pos], pos);
+                int newSid = slowResultSid(slowResult);
+                int newMatch = slowResultLastMatch(slowResult);
+                if (newMatch >= 0) lastMatchEnd = newMatch;
+                if (newSid == dead) { sid = dead; break; }
+                if (newSid == quit) { return SearchResult.gaveUp(pos); }
+                sid = newSid;
+                pos++;
             }
-
-            // Slow path: delegate to helper
-            long slowResult = handleSlowTransition(cache, sid, classId,
-                    nextSid, haystack[pos], pos, charsSearched);
-            int newSid = slowResultSid(slowResult);
-            int newMatch = slowResultLastMatch(slowResult);
-            if (newMatch >= 0) lastMatchEnd = newMatch;
-            if (newSid == dead) { sid = dead; break; }
-            if (newSid == quit) { return SearchResult.gaveUp(pos); }
-            sid = newSid;
-            pos++;
-            charsSearched++;
-            continue;
         }
 
         // Right-edge transition
         // Ref: upstream/regex/regex-automata/src/hybrid/search.rs:693-726
-        lastMatchEnd = handleRightEdge(cache, sid, haystack, end, lastMatchEnd, charsSearched);
+        cache.charsSearched += (pos - startPos);
+        lastMatchEnd = handleRightEdge(cache, sid, haystack, end, lastMatchEnd);
         if (lastMatchEnd == -2) return SearchResult.gaveUp(end);
 
         if (lastMatchEnd >= 0) return SearchResult.match(lastMatchEnd);
@@ -217,18 +212,15 @@ public final class LazyDFA {
         char[] haystack = input.haystack();
         int start = input.start();
         int end = input.end();
-        int stride = charClasses.stride();
-        int dead = DFACache.dead(stride);
-        int quit = DFACache.quit(stride);
 
         int sid = getOrComputeStartState(input, cache);
         if (sid == dead) return SearchResult.NO_MATCH;
         if (sid == quit) return SearchResult.gaveUp(end);
 
         int lastMatchStart = -1;
-        long charsSearched = cache.charsSearched;
 
         int pos = end - 1;
+        int startPos = pos;
         while (pos >= start) {
             // Inner unrolled loop: process 4 transitions per iteration (reverse).
             while (pos >= start + 3) {
@@ -236,18 +228,16 @@ public final class LazyDFA {
                 if (s0 <= quit) { break; }
 
                 int s1 = cache.nextState(s0, charClasses.classify(haystack[pos - 1]));
-                if (s1 <= quit) { sid = s0; pos--; charsSearched++; break; }
+                if (s1 <= quit) { sid = s0; pos--; break; }
 
                 int s2 = cache.nextState(s1, charClasses.classify(haystack[pos - 2]));
-                if (s2 <= quit) { sid = s1; pos -= 2; charsSearched += 2; break; }
+                if (s2 <= quit) { sid = s1; pos -= 2; break; }
 
                 int s3 = cache.nextState(s2, charClasses.classify(haystack[pos - 3]));
-                if (s3 <= quit) { sid = s2; pos -= 3; charsSearched += 3; break; }
+                if (s3 <= quit) { sid = s2; pos -= 3; break; }
 
                 sid = s3;
                 pos -= 4;
-                charsSearched += 4;
-                continue;
             }
 
             // Outer dispatch: handle break-out or tail chars.
@@ -259,35 +249,30 @@ public final class LazyDFA {
             if (nextSid > quit) {
                 sid = nextSid;
                 pos--;
-                charsSearched++;
-                continue;
-            }
-
-            if (nextSid < 0) {
+            } else if (nextSid < 0) {
                 lastMatchStart = pos + 1;
                 sid = nextSid & 0x7FFF_FFFF;
                 pos--;
-                charsSearched++;
-                continue;
+            } else {
+                // Slow path: sync charsSearched then delegate to helper
+                cache.charsSearched += (startPos - pos);
+                startPos = pos;
+                long slowResult = handleSlowTransitionRev(cache, sid, classId,
+                        nextSid, haystack[pos], pos);
+                int newSid = slowResultSid(slowResult);
+                int newMatch = slowResultLastMatch(slowResult);
+                if (newMatch >= 0) lastMatchStart = newMatch;
+                if (newSid == dead) { sid = dead; break; }
+                if (newSid == quit) { return SearchResult.gaveUp(pos); }
+                sid = newSid;
+                pos--;
             }
-
-            // Slow path: delegate to helper
-            long slowResult = handleSlowTransitionRev(cache, sid, classId,
-                    nextSid, haystack[pos], pos, charsSearched);
-            int newSid = slowResultSid(slowResult);
-            int newMatch = slowResultLastMatch(slowResult);
-            if (newMatch >= 0) lastMatchStart = newMatch;
-            if (newSid == dead) { sid = dead; break; }
-            if (newSid == quit) { return SearchResult.gaveUp(pos); }
-            sid = newSid;
-            pos--;
-            charsSearched++;
-            continue;
         }
 
         // Left-edge transition
         // Ref: upstream/regex/regex-automata/src/hybrid/search.rs:737-754
-        lastMatchStart = handleLeftEdge(cache, sid, haystack, start, lastMatchStart, charsSearched);
+        cache.charsSearched += (startPos - pos);
+        lastMatchStart = handleLeftEdge(cache, sid, haystack, start, lastMatchStart);
         if (lastMatchStart == -2) return SearchResult.gaveUp(start);
 
         if (lastMatchStart >= 0) return SearchResult.match(lastMatchStart);
@@ -654,15 +639,11 @@ public final class LazyDFA {
      * sentinel), high 32 bits = updated lastMatchEnd (-1 if unchanged).</p>
      */
     private long handleSlowTransition(DFACache cache, int sid, int classId,
-                                       int nextSid, char inputChar, int pos,
-                                       long charsSearched) {
-        int stride = charClasses.stride();
-        int dead = DFACache.dead(stride);
-        int quit = DFACache.quit(stride);
+                                       int nextSid, char inputChar, int pos) {
+        // cache.charsSearched is already up-to-date (caller synced it)
         int lastMatchEnd = -1;
 
         if (nextSid == DFACache.UNKNOWN) {
-            cache.charsSearched = charsSearched;
             nextSid = computeNextState(cache, sid, classId, inputChar);
             if (nextSid == quit) {
                 return packSlowResult(quit, -1);
@@ -678,7 +659,6 @@ public final class LazyDFA {
             return packSlowResult(dead, -1);
         }
         // nextSid == quit
-        cache.charsSearched = charsSearched;
         return packSlowResult(quit, -1);
     }
 
@@ -687,15 +667,11 @@ public final class LazyDFA {
      * Same as handleSlowTransition but match position is pos + 1.
      */
     private long handleSlowTransitionRev(DFACache cache, int sid, int classId,
-                                          int nextSid, char inputChar, int pos,
-                                          long charsSearched) {
-        int stride = charClasses.stride();
-        int dead = DFACache.dead(stride);
-        int quit = DFACache.quit(stride);
+                                          int nextSid, char inputChar, int pos) {
+        // cache.charsSearched is already up-to-date (caller synced it)
         int lastMatchStart = -1;
 
         if (nextSid == DFACache.UNKNOWN) {
-            cache.charsSearched = charsSearched;
             nextSid = computeNextState(cache, sid, classId, inputChar);
             if (nextSid == quit) {
                 return packSlowResult(quit, -1);
@@ -710,7 +686,7 @@ public final class LazyDFA {
         if (nextSid == dead) {
             return packSlowResult(dead, -1);
         }
-        cache.charsSearched = charsSearched;
+        // nextSid == quit
         return packSlowResult(quit, -1);
     }
 
@@ -722,14 +698,11 @@ public final class LazyDFA {
      * @return updated lastMatchEnd, or -2 as sentinel for gaveUp at end
      */
     private int handleRightEdge(DFACache cache, int sid, char[] haystack,
-                                 int end, int lastMatchEnd, long charsSearched) {
-        int stride = charClasses.stride();
-        int dead = DFACache.dead(stride);
-        int quit = DFACache.quit(stride);
+                                 int end, int lastMatchEnd) {
+        // cache.charsSearched is already up-to-date (caller synced it)
         int rawSid = sid & 0x7FFF_FFFF;
 
         if (rawSid != dead && rawSid != quit) {
-            cache.charsSearched = charsSearched;
             int rightEdgeSid;
             if (end < haystack.length) {
                 int classId = charClasses.classify(haystack[end]);
@@ -743,8 +716,6 @@ public final class LazyDFA {
             if (rightEdgeSid < 0) {
                 return end; // match at right edge
             }
-        } else {
-            cache.charsSearched = charsSearched;
         }
         return lastMatchEnd; // -2 is safe: valid positions are >= 0, -1 means no match
     }
@@ -757,14 +728,11 @@ public final class LazyDFA {
      * @return updated lastMatchStart, or -2 as sentinel for gaveUp at start
      */
     private int handleLeftEdge(DFACache cache, int sid, char[] haystack,
-                                int start, int lastMatchStart, long charsSearched) {
-        int stride = charClasses.stride();
-        int dead = DFACache.dead(stride);
-        int quit = DFACache.quit(stride);
+                                int start, int lastMatchStart) {
+        // cache.charsSearched is already up-to-date (caller synced it)
         int rawSid = sid & 0x7FFF_FFFF;
 
         if (rawSid != dead && rawSid != quit) {
-            cache.charsSearched = charsSearched;
             int leftEdgeSid;
             if (start > 0) {
                 int classId = charClasses.classify(haystack[start - 1]);
@@ -778,8 +746,6 @@ public final class LazyDFA {
             if (leftEdgeSid < 0) {
                 return start; // match at left edge
             }
-        } else {
-            cache.charsSearched = charsSearched;
         }
         return lastMatchStart;
     }
