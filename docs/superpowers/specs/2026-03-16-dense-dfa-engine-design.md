@@ -107,17 +107,21 @@ This is ~150 lines of complex, well-tested code. Duplicating it would be error-p
 3. Initialize worklist with start states
 4. While worklist not empty:
    a. Pop a state ID from worklist
-   b. For each equivalence class (0..classCount-1):
+   b. Snapshot stateCount = cache.stateCount()
+   c. For each equivalence class (0..classCount), inclusive of EOI class:
       - Call computeNextState on the temporary LazyDFA
       - Cache the transition in the temporary DFACache
-      - If the destination state is new, add it to worklist
-   c. If state count exceeds limit (e.g., 5,000): return null
-5. Copy transitions from DFACache.transTable into flat int[] (reindexing)
+   d. For each newly-created state (index stateCount..cache.stateCount()):
+      - Add the new state ID to worklist
+   e. If state count exceeds limit (e.g., 5,000): return null
+5. Copy transitions from DFACache.transTable into flat int[]
 6. Shuffle match states to end, compute minMatchState
-7. Return DenseDFA
+7. Remap ALL transition targets in the flat table to reflect shuffled IDs.
+   Dead and quit sentinels remain at their fixed positions.
+8. Return DenseDFA
 ```
 
-**State limit:** Default 5,000 states. At stride=64, this is 5,000 × 64 × 4 bytes = 1.28MB — reasonable. Upstream defaults to 2× the NFA size or an absolute limit.
+**State limit:** Memory-based rather than flat state count. Default: 2MB (matching the lazy DFA's default cache capacity). Effective state limit = `maxMemory / (stride * 4)`. At stride=64 this is ~8,000 states; at stride=256 this is ~2,000 states. This avoids surprises with Unicode-heavy patterns that have large strides.
 
 **Accessing LazyDFA internals:** The builder needs to call `computeNextState`, `epsilonClosure`, and `getOrComputeStartState` — which are currently private on LazyDFA. Options:
 - Make them package-private (both classes in `dfa.lazy` or a shared parent package)
@@ -128,13 +132,20 @@ This is ~150 lines of complex, well-tested code. Duplicating it would be error-p
 
 ```java
 // On LazyDFA — new public method for DenseDFABuilder
-public void computeAllTransitions(DFACache cache, int sid) {
-    for (int cls = 0; cls < charClasses.classCount(); cls++) {
-        if (cache.nextState(sid, cls) == DFACache.UNKNOWN) {
-            int nextSid = computeNextState(cache, sid, cls);
-            cache.setTransition(sid, cls, nextSid);
+// Computes transitions for ALL equivalence classes including EOI.
+// Returns the number of states before computation (caller compares
+// with cache.stateCount() after to discover newly-created states).
+public int computeAllTransitions(DFACache cache, int sid) {
+    int beforeCount = cache.stateCount();
+    int rawSid = sid & 0x7FFF_FFFF;
+    // Include EOI class (classCount) — needed for right-edge transitions
+    for (int cls = 0; cls <= charClasses.classCount(); cls++) {
+        if (cache.nextState(rawSid, cls) == DFACache.UNKNOWN) {
+            int nextSid = computeNextState(cache, rawSid, cls);
+            cache.setTransition(rawSid, cls, nextSid);
         }
     }
+    return beforeCount;
 }
 ```
 
@@ -165,9 +176,17 @@ public long searchFwd(Input input) {
         }
         if (pos >= end) break;
 
-        sid = transTable[sid + charClasses.classify(haystack[pos])];
+        // After inner loop break-out, check if current sid is a match state.
+        // Match semantics: sid >= minMatch means the SOURCE state contained
+        // an NFA Match — the match end is the current pos (one past the
+        // last consumed char). Record it before taking the next transition.
         if (sid >= minMatch) {
             lastMatchEnd = pos;
+        }
+
+        sid = transTable[sid + charClasses.classify(haystack[pos])];
+        if (sid >= minMatch) {
+            lastMatchEnd = pos + 1;
             pos++;
         } else if (sid == dead) {
             break;
@@ -191,7 +210,7 @@ public long searchFwd(Input input) {
 
 **No `charsSearched` tracking** — the dense DFA never gives up due to cache pressure (there's no cache to clear). The only give-up is quit chars.
 
-**Match semantics:** Identical to lazy DFA. Matches are delayed by one char (match flag on destination state). `sid >= minMatchState` means the source state contained an NFA Match, and the match end is the current `pos`.
+**Match semantics:** Identical to lazy DFA. Matches are delayed by one char (match flag on destination state). `sid >= minMatchState` means the source state contained an NFA Match, and the match end is the current `pos`. **Critical:** after the unrolled inner loop breaks out (because it saw `s_N >= minMatch`), the outer dispatch must check if the current `sid` is a match state BEFORE taking the next transition — otherwise the match goes unrecorded. The implementer must verify match-recording logic against the lazy DFA's behavior and upstream's `find_fwd_imp` (`dfa/search.rs:125-181`). Write a focused test comparing dense vs lazy DFA match positions for edge cases (empty matches, matches at span boundaries, consecutive matches).
 
 **Estimated bytecode:** ~200-250 bytes. Well within C2's optimization zone. All `classify` calls should be inlined.
 
@@ -228,6 +247,14 @@ private Captures dfaSearch(Input input, Cache cache) {
 ```
 
 The reverse DFA remains lazy (it runs on narrow windows where pre-compilation has less value).
+
+**All call sites that need the dense DFA preference:**
+- `dfaSearch()` — forward DFA in non-capture three-phase search
+- `dfaSearchCaptures()` — forward DFA in capture three-phase search
+- `isMatch()` — forward DFA for quick match test (line 66)
+- `isMatchPrefilter()` — forward DFA inside prefilter candidate loop (line 86)
+
+Each of these currently calls `forwardDFA.searchFwdLong(input, cache.forwardDFACache())`. Replace with: if `denseDFA != null`, call `denseDFA.searchFwd(input)` instead.
 
 **Strategy.Core record:** Add optional `DenseDFA denseDFA` parameter. Callers that don't have a dense DFA pass `null`.
 
