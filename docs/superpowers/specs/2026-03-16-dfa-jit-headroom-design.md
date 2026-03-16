@@ -48,24 +48,30 @@ Phase 2 only proceeds if Phase 1 demonstrates:
 
 Handles UNKNOWN, dead, and quit states — cache misses and terminal conditions. Hit rarely during steady-state search (only on first encounter of a DFA state, or at end of match).
 
-Extract to a private method:
+Extract to a private method returning a packed `long` encoding both the new state ID and the updated `lastMatchEnd`:
+
 ```java
 /**
  * Handle slow-path state transitions: UNKNOWN (compute new state),
  * dead (stop searching), or quit (give up to PikeVM).
  *
- * Returns a primitive-encoded result:
- * - If positive: the new state ID (continue searching with this sid)
- * - If SearchResult.isGaveUp(): return this value from searchFwdLong
- * - If SearchResult.isNoMatch(): the state is dead, break the loop
+ * Returns a packed long:
+ * - Low 32 bits: new state ID, or DEAD sentinel, or QUIT sentinel
+ * - High 32 bits: updated lastMatchEnd (-1 if unchanged)
  *
- * Updates lastMatchEnd in the cache if a match-flagged state is computed.
+ * Sentinel values in low 32 bits:
+ * - dead(stride): break the main loop
+ * - quit(stride): return SearchResult.gaveUp(pos) from searchFwdLong
+ * - anything else: continue with this as the new sid
  */
-private int handleSlowTransition(DFACache cache, int sid, int classId,
-                                  char inputChar, long charsSearched)
+private long handleSlowTransition(DFACache cache, int sid, int classId,
+                                   char inputChar, int pos,
+                                   long charsSearched)
 ```
 
-The caller checks the return value and either continues, breaks, or returns.
+The caller unpacks: `int newSid = (int) result; int newLastMatch = (int) (result >>> 32);`
+
+This avoids adding mutable state to the cache for `lastMatchEnd` and keeps the hot path free of extra field accesses. Follows the project's existing `SearchResult` long-packing convention.
 
 **Estimated bytecode savings:** ~100-120 bytes
 
@@ -91,8 +97,17 @@ private int handleRightEdge(DFACache cache, int sid, char[] haystack,
 **C. Mirror in searchRevLong** (625 bytes)
 
 Apply the same extractions to `searchRevLong()`:
-- Slow-path dispatch → `handleSlowTransitionRev()`
-- Left-edge transition → `handleLeftEdge()`
+
+```java
+private long handleSlowTransitionRev(DFACache cache, int sid, int classId,
+                                      char inputChar, int pos,
+                                      long charsSearched)
+
+private int handleLeftEdge(DFACache cache, int sid, char[] haystack,
+                            int start, int lastMatchStart, long charsSearched)
+```
+
+Same packed-long return convention for the slow transition. `handleLeftEdge` mirrors `handleRightEdge` but processes the left boundary (position before the span, or start-of-text EOI).
 
 ### What stays in searchFwdLong
 
@@ -173,13 +188,14 @@ private final Prefilter prefilter; // null if no prefilter available
 
 Passed via a new factory method or added to `create()`. Only the forward DFA receives a prefilter (reverse DFA searches narrowed windows where prefilter doesn't help).
 
-Cache the start state ID for the `sid == startSid` check:
+The start state ID for the `sid == startSid` check is captured as a local variable at the top of `searchFwdLong()`, right after the `getOrComputeStartState()` call:
 
 ```java
-private int cachedStartSid = DFACache.UNKNOWN;
+int sid = getOrComputeStartState(input, cache);
+int startSid = sid;  // capture for prefilter-at-start checks
 ```
 
-Set on first `getOrComputeStartState()` call.
+No instance field needed — the start state is constant within a single search invocation. The `startSid` local is only used when `prefilter != null && lookSetAny.isEmpty()`.
 
 ### Integration points in searchFwdLong
 
@@ -198,10 +214,10 @@ if (prefilter != null && !input.isAnchored() && lookSetAny.isEmpty()) {
 
 **Point 2 — When returning to start state in outer dispatch:**
 
-After the unrolled inner loop breaks out, if the current state equals the cached start state:
+After the unrolled inner loop breaks out, if the current state equals the start state AND the universal-start guard is met. Both guards are explicit:
 
 ```java
-if (sid == cachedStartSid && prefilter != null) {
+if (prefilter != null && lookSetAny.isEmpty() && sid == startSid) {
     int candidate = prefilter.find(input.haystackStr(), pos, end);
     if (candidate < 0) break;
     if (candidate > pos) {
@@ -210,6 +226,8 @@ if (sid == cachedStartSid && prefilter != null) {
     }
 }
 ```
+
+Note: the prefilter skip does NOT need to write `cache.charsSearched` — it doesn't trigger state computation. The local `charsSearched` correctly accounts for skipped characters and is only written to the cache before `computeNextState` calls (in the extracted slow-path helper).
 
 **Guard: universal start only.** Patterns with look-assertions (word boundaries, line anchors) have position-dependent start states. The prefilter skip changes `pos`, which would require recomputing the start state. For simplicity, prefilter-at-start only activates when `lookSetAny.isEmpty()` — covering the common case of simple literal-prefix patterns. Patterns with look-assertions continue to use the existing Strategy-level prefilter loop.
 
@@ -223,6 +241,7 @@ if (sid == cachedStartSid && prefilter != null) {
 
 After adding prefilter code, repeat the `-XX:+PrintInlining` analysis. Verify:
 - `classify` inline count is still ≥ Phase 1 level (not regressed)
+- Extracted helper methods (`handleSlowTransition`, `handleRightEdge`) are still being inlined or called efficiently — if C2 stops inlining them after Phase 2 adds more code, Phase 1 gains could evaporate
 - searchFwdLong bytecode size is still below ~500 bytes
 - No "hot method too big" regression
 
