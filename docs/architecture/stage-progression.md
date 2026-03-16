@@ -176,18 +176,32 @@ New `DenseDFA` engine that pre-compiles all DFA states and transitions into a fl
 - Tests: 2,193 total, 0 failures
 - Key wins vs S11: charClass **+17%** (83 → 94), unicodeWord **+25%** (15,037 → 19,807), rawCharClass **+17%** (89 → 105), rawUnicodeWord **+64%** (9,532 → 15,686)
 
-## Benchmark Comparison (same machine, 2026-03-15/16)
+### stage-13-acceleration-states (`d1ad55a`)
+**DFA acceleration states for self-looping states**
 
-| Benchmark | S1 | S2 | S6 | S7 | S8 | S9 | S10 | S11 | **S12** | JDK | **vs JDK** |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| literal (ops/s) | 14 | 4,746 | 4,663 | 4,543 | 4,569 | 3,326 | 4,787 | 4,880 | **4,956** | 3,310 | **1.50x** |
-| charClass | 0.06 | 9.5 | 70.6 | 75.1 | 76.1 | 60.9 | 81.4 | 83.5 | **94** | 291 | 3.1x |
-| alternation | 6.5 | 44.8 | 45.0 | 45.0 | 44.4 | 39.0 | 44.1 | 45.3 | **46.5** | 104 | 2.2x |
-| captures | 60 | 58.8 | 350 | 356 | 366 | 12,362 | 16,928 | 18,190 | **16,499** | 17,931 | 0.92x |
-| unicodeWord | 13 | 12.9 | 18.3 | 13,499 | 13,945 | 11,291 | 15,267 | 15,037 | **19,807** | 38,605 | 2.0x |
-| multiline | — | — | — | — | 211 | 192 | 233 | 215 | **215** | 1,035 | 4.8x |
-| literalMiss | — | — | — | — | 4,964 | 3,982 | 5,107 | 5,223 | **5,252** | 2,589 | **2.03x** |
-| wordRepeat | — | — | — | — | 94,535 | 85,364 | 93,662 | 90,326 | **92,508** | 11,401 | **8.1x** |
+Per-state `boolean[128]` escape tables for dense DFA states where ≤3 equivalence classes escape the self-loop. Reduces per-char cost from 2 array loads (classify + transTable) to 1 (escape table check). Detection at build time in DenseDFABuilder, scan in searchFwd before the unrolled inner loop.
+
+- Match states that are also accelerated get `lastMatchEnd` updated at both entry and exit of the scan — every self-loop char extends the match
+- 0-escape-class states permitted (intentional divergence from upstream which requires ≥1 needle)
+- Non-ASCII chars (≥128) break out of the scan and fall through to normal DFA processing
+
+- Engines: PikeVM + lazy DFA + bounded backtracker + one-pass DFA + dense DFA (with acceleration)
+- Tests: 2,197 total, 0 failures
+- Key wins vs S12: charClass **+9%** (94 → 102), captures **+25%** (16.7k → 20.9k, regression fixed), rawCharClass **+5%** (105 → 110)
+- Key wins vs S11 baseline: charClass **+27%**, unicodeWord **+22%**, captures **+14%**, rawCharClass **+24%**, rawUnicodeWord **+61%**
+
+## Benchmark Comparison (same machine, 2026-03-15/16/17)
+
+| Benchmark | S1 | S6 | S8 | S9 | S10 | S11 | S12 | **S13** | JDK | **vs JDK** |
+|---|---|---|---|---|---|---|---|---|---|---|
+| literal (ops/s) | 14 | 4,663 | 4,569 | 3,326 | 4,787 | 4,880 | 4,956 | **4,821** | 3,268 | **1.48x** |
+| charClass | 0.06 | 70.6 | 76.1 | 60.9 | 81.4 | 83.5 | 94 | **102** | 285 | 2.8x |
+| alternation | 6.5 | 45.0 | 44.4 | 39.0 | 44.1 | 45.3 | 46.5 | **46.5** | 106 | 2.3x |
+| captures | 60 | 350 | 366 | 12,362 | 16,928 | 18,190 | 16,499 | **20,939** | 19,012 | **1.10x** |
+| unicodeWord | 13 | 18.3 | 13,945 | 11,291 | 15,267 | 15,037 | 19,807 | **19,264** | 32,603 | 1.7x |
+| multiline | — | — | 211 | 192 | 233 | 215 | 215 | **215** | 1,036 | 4.8x |
+| literalMiss | — | — | 4,964 | 3,982 | 5,107 | 5,223 | 5,252 | **5,147** | 2,582 | **1.99x** |
+| wordRepeat | — | — | 94,535 | 85,364 | 93,662 | 90,326 | 92,508 | **96,098** | 11,373 | **8.4x** |
 
 Notes:
 - S4 unicodeWord (15,717) was based on three-phase with DFA edge bugs (27 test failures). S7 unicodeWord (13,499) is fully correct.
@@ -200,3 +214,5 @@ Notes:
 - S11 multiline numbers were inflated by single-fork JMH variance (238 SearchBenchmark vs 216 RawEngine — impossible since SearchBenchmark has more overhead). The 5-fork S12 measurement (215 ±1.2) is the correct baseline for multiline.
 - S12 captures regression (18,190 → 16,499) is from dense DFA having different search characteristics than lazy DFA for this pattern. Still competitive with JDK (0.92x). The charClass +17% and unicodeWord +25% wins are the primary S12 gains.
 - S12 DenseDFA.searchFwd is 330 bytecodes — well within C2's optimization zone, all classify calls inlined. Separate JIT budget from LazyDFA's searchFwdLong.
+- S12 captures regression (18k→16.5k) was fixed by S13 acceleration — the escape-table scan in the matching state reduced per-char overhead enough to recover and exceed the baseline.
+- S13 acceleration benefits charClass the most (+27% from S11) because the matching state self-loops on `[a-zA-Z]` with a single escape class.
