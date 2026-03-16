@@ -38,6 +38,10 @@ The `boolean[128]` escape table maps each ASCII char to `true` if its equivalenc
 
 **Max escape classes:** 3 (matching upstream). More than 3 means the scan has too many branches per char to be faster than the normal 2-load path.
 
+**0-escape-class states:** Unlike upstream, which requires ≥1 needle and panics on empty accels (`accel.rs:103`), our boolean-table approach naturally handles 0-escape states. The scan degenerates to a run-to-end on ASCII input, which is correct for states that truly never exit on ASCII (e.g., `[^\x00-\x7F]*`). This is an intentional divergence — the table-based scan has no special case for 0 needles.
+
+**EOI class exclusion:** The escape-class detection loop iterates `0..classCount-1`, deliberately excluding the EOI class (`classCount`). EOI transitions are handled outside the main scan loop entirely (by `handleRightEdge` after the search loop exits). Including EOI in escape detection would create false escapes — EOI is not a char that appears in the haystack.
+
 **Storage:** `boolean[][] accelTables` on `DenseDFA`, indexed by state index (`sid / stride`). `null` entry means not accelerated. Typical: 1-3 accelerated states × 128 bytes = 128-384 bytes total.
 
 ### Building the escape table
@@ -170,6 +174,7 @@ Pass `accelTables` to the `DenseDFA` constructor.
 | Non-accelerated states pay cost of null check | Single array load + null test, negligible |
 | Match-state acceleration records wrong lastMatchEnd | Test against lazy DFA for all patterns |
 | boolean[128] table misclassifies chars | Build from classify() which is already tested |
+| Unicode `\w+` may not be accelerable | Unicode word-char patterns may produce >3 escape classes, making the matching state non-accelerable. Verify during implementation — if `\w+` has >3 escapes, the benchmark improvement is from the dense DFA itself (stage 12), not from acceleration |
 
 ## What We Don't Build
 
