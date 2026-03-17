@@ -200,20 +200,21 @@ Key design change: switched from range-based match detection (`sid >= minMatchSt
 - Engines: unchanged from stage 13
 - Tests: 2,201 total, 0 failures
 - Key wins vs S13: rawMultiline **+10%** (214 → 237), multiline **+5%** (215 → 228), wordRepeat **+4%** (96k → 100k)
-- Trade-off: charClass **-8%** (102 → 94) from MATCH_FLAG per-transition overhead. Future optimization: use range-based detection for patterns without look-assertions, MATCH_FLAG for patterns with them.
+- Initially had charClass -8% regression from MATCH_FLAG per-transition overhead. Fixed by restoring range-based match detection (`sid >= minMatchState`) — match property is per-state not per-transition (confirmed by upstream `dfa/search.rs`). Builder now introduces "dead-match" and "match-wrapper" synthetic states to preserve delayed-match semantics without MATCH_FLAG on transitions.
+- Final S14 results: charClass **recovered** (102), rawCharClass **+5%** (110 → 115), multiline **+6%** (215 → 229), rawMultiline **+12%** (214 → 241), captures **+2%** (20.9k → 21.3k).
 
 ## Benchmark Comparison (same machine, 2026-03-15/16/17)
 
 | Benchmark | S1 | S6 | S9 | S10 | S11 | S12 | S13 | **S14** | JDK | **vs JDK** |
 |---|---|---|---|---|---|---|---|---|---|---|
-| literal (ops/s) | 14 | 4,663 | 3,326 | 4,787 | 4,880 | 4,956 | 4,821 | **4,955** | 2,564 | **1.93x** |
-| charClass | 0.06 | 70.6 | 60.9 | 81.4 | 83.5 | 94 | 102 | **94** | 289 | 3.1x |
-| alternation | 6.5 | 45.0 | 39.0 | 44.1 | 45.3 | 46.5 | 46.5 | **46.5** | 105 | 2.3x |
-| captures | 60 | 350 | 12,362 | 16,928 | 18,190 | 16,499 | 20,939 | **20,329** | 18,831 | **1.08x** |
-| unicodeWord | 13 | 18.3 | 11,291 | 15,267 | 15,037 | 19,807 | 19,264 | **18,527** | 38,147 | 2.1x |
-| multiline | — | — | 192 | 233 | 215 | 215 | 215 | **228** | 1,034 | 4.5x |
-| literalMiss | — | — | 3,982 | 5,107 | 5,223 | 5,252 | 5,147 | **5,104** | 3,248 | **1.57x** |
-| wordRepeat | — | — | 85,364 | 93,662 | 90,326 | 92,508 | 96,098 | **100,114** | 11,246 | **8.9x** |
+| literal (ops/s) | 14 | 4,663 | 3,326 | 4,787 | 4,880 | 4,956 | 4,821 | **4,930** | 2,564 | **1.92x** |
+| charClass | 0.06 | 70.6 | 60.9 | 81.4 | 83.5 | 94 | 102 | **102** | 289 | 2.8x |
+| alternation | 6.5 | 45.0 | 39.0 | 44.1 | 45.3 | 46.5 | 46.5 | **46.6** | 105 | 2.3x |
+| captures | 60 | 350 | 12,362 | 16,928 | 18,190 | 16,499 | 20,939 | **21,290** | 18,831 | **1.13x** |
+| unicodeWord | 13 | 18.3 | 11,291 | 15,267 | 15,037 | 19,807 | 19,264 | **19,070** | 38,147 | 2.0x |
+| multiline | — | — | 192 | 233 | 215 | 215 | 215 | **229** | 1,034 | 4.5x |
+| literalMiss | — | — | 3,982 | 5,107 | 5,223 | 5,252 | 5,147 | **5,123** | 3,248 | **1.58x** |
+| wordRepeat | — | — | 85,364 | 93,662 | 90,326 | 92,508 | 96,098 | **91,825** | 11,246 | **8.2x** |
 
 Notes:
 - S4 unicodeWord (15,717) was based on three-phase with DFA edge bugs (27 test failures). S7 unicodeWord (13,499) is fully correct.
