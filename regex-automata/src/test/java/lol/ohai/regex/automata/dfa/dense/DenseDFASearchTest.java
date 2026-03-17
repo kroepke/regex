@@ -144,16 +144,15 @@ class DenseDFASearchTest {
         DenseDFA dfa = buildDense("cat|dog|bird");
         assertNotNull(dfa);
 
-        // Verify the DFA walk for "cat" reaches a match-flagged transition.
-        // Transitions preserve MATCH_FLAG, so we strip it between steps.
+        // Verify the DFA walk for "cat" reaches a match state (range-based).
         CharClasses cc = dfa.charClasses();
         int[] tt = dfa.transTable();
         int sid = dfa.startStates()[0]; // TEXT unanchored
-        int s1 = tt[sid + cc.classify('c')] & 0x7FFF_FFFF;
-        int s2 = tt[s1 + cc.classify('a')] & 0x7FFF_FFFF;
+        int s1 = tt[sid + cc.classify('c')];
+        int s2 = tt[s1 + cc.classify('a')];
         int catSid = tt[s2 + cc.classify('t')];
-        // The transition to catSid should carry MATCH_FLAG (delayed match for "cat")
-        assertTrue(catSid < 0, "transition after 'cat' should carry MATCH_FLAG");
+        // catSid should be a match state (sid >= minMatchState)
+        assertTrue(dfa.isMatch(catSid), "state after 'cat' should be a match state");
 
         // Test the full search
         long result = dfa.searchFwd(Input.of("I have a cat and a dog"));

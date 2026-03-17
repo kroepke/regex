@@ -104,24 +104,16 @@ class DenseDFABuilderTest {
     }
 
     @Test
-    void matchFlagPreservedOnTransitions() {
-        // MATCH_FLAG (0x8000_0000) is preserved on transitions for delayed-match
-        // detection. Verify that at least some transitions from match states have
-        // MATCH_FLAG, and that stripping the flag gives valid state IDs.
+    void noMatchFlagOnTransitions() {
+        // With range-based match detection, transitions are plain state IDs
+        // with no MATCH_FLAG. Verify no transition has the high bit set.
         DenseDFA dfa = buildDense("[a-z]+");
         assertNotNull(dfa);
         int[] table = dfa.transTable();
-        int stride = dfa.stride();
-        boolean hasMatchFlag = false;
         for (int i = 0; i < table.length; i++) {
-            if ((table[i] & 0x8000_0000) != 0) {
-                hasMatchFlag = true;
-                int rawTarget = table[i] & 0x7FFF_FFFF;
-                assertEquals(0, rawTarget % stride,
-                        "MATCH_FLAG transition at " + i + " has invalid raw target");
-            }
+            assertTrue((table[i] & 0x8000_0000) == 0,
+                    "transition at " + i + " should not have MATCH_FLAG");
         }
-        assertTrue(hasMatchFlag, "[a-z]+ should have MATCH_FLAG transitions from match states");
     }
 
     @Test
