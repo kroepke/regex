@@ -63,21 +63,17 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
             if (prefilter != null && !input.isAnchored()) {
                 return isMatchPrefilter(input, cache);
             }
-            if (denseDFA != null || forwardDFA != null) {
-                long fwdResult;
-                if (denseDFA != null) {
-                    fwdResult = denseDFA.searchFwd(input);
-                    if (SearchResult.isGaveUp(fwdResult)) {
-                        fwdResult = forwardDFA != null
-                                ? forwardDFA.searchFwdLong(input, cache.forwardDFACache())
-                                : SearchResult.NO_MATCH;
-                    }
-                } else {
-                    fwdResult = forwardDFA.searchFwdLong(input, cache.forwardDFACache());
-                }
-                if (SearchResult.isMatch(fwdResult)) return true;
-                if (SearchResult.isNoMatch(fwdResult)) return false;
-                return pikeVM.isMatch(input, cache.pikeVMCache());
+            // Forward DFA only — no reverse needed for isMatch
+            if (denseDFA != null) {
+                long result = denseDFA.searchFwd(input);
+                if (SearchResult.isMatch(result)) return true;
+                if (SearchResult.isNoMatch(result)) return false;
+                // GaveUp — fall through to lazy DFA
+            }
+            if (forwardDFA != null) {
+                long result = forwardDFA.searchFwdLong(input, cache.forwardDFACache());
+                if (SearchResult.isMatch(result)) return true;
+                if (SearchResult.isNoMatch(result)) return false;
             }
             return pikeVM.isMatch(input, cache.pikeVMCache());
         }
@@ -93,30 +89,20 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                     return false;
                 }
                 Input candidateInput = input.withBounds(pos, end, false);
-                if (denseDFA != null || forwardDFA != null) {
-                    long r;
-                    if (denseDFA != null) {
-                        r = denseDFA.searchFwd(candidateInput);
-                        if (SearchResult.isGaveUp(r)) {
-                            r = forwardDFA != null
-                                    ? forwardDFA.searchFwdLong(candidateInput, cache.forwardDFACache())
-                                    : SearchResult.NO_MATCH;
-                        }
-                    } else {
-                        r = forwardDFA.searchFwdLong(candidateInput, cache.forwardDFACache());
-                    }
-                    if (SearchResult.isMatch(r)) { return true; }
+                if (denseDFA != null) {
+                    long r = denseDFA.searchFwd(candidateInput);
+                    if (SearchResult.isMatch(r)) return true;
+                    if (SearchResult.isNoMatch(r)) { start = pos + 1; continue; }
+                    // GaveUp — fall through to lazy DFA
+                }
+                if (forwardDFA != null) {
+                    long r = forwardDFA.searchFwdLong(candidateInput, cache.forwardDFACache());
+                    if (SearchResult.isMatch(r)) return true;
                     if (SearchResult.isNoMatch(r)) { start = pos + 1; continue; }
                     // GaveUp (both dense and lazy failed)
-                    if (pikeVM.isMatch(candidateInput, cache.pikeVMCache())) return true;
-                    start = pos + 1;
-                    continue;
-                } else {
-                    if (pikeVM.isMatch(candidateInput, cache.pikeVMCache())) {
-                        return true;
-                    }
-                    start = pos + 1;
                 }
+                if (pikeVM.isMatch(candidateInput, cache.pikeVMCache())) return true;
+                start = pos + 1;
             }
             return false;
         }
@@ -125,13 +111,13 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
         public Captures search(Input input, Cache cache) {
             if (prefilter != null && !input.isAnchored()) {
                 if (denseDFA != null || forwardDFA != null) {
-                    return prefilterLoop(input, cache, (in, c) -> dfaSearch(in, c));
+                    return prefilterLoop(input, cache, (in, c) -> dfaSearchImpl(in, c, false));
                 }
                 return prefilterLoop(input, cache,
                         (in, c) -> pikeVM.search(in, c.pikeVMCache()));
             }
             if (denseDFA != null || forwardDFA != null) {
-                return dfaSearch(input, cache);
+                return dfaSearchImpl(input, cache, false);
             }
             return pikeVM.search(input, cache.pikeVMCache());
         }
@@ -140,29 +126,31 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
         public Captures searchCaptures(Input input, Cache cache) {
             if (prefilter != null && !input.isAnchored()) {
                 if (denseDFA != null || forwardDFA != null) {
-                    return prefilterLoop(input, cache,
-                            (in, c) -> dfaSearchCaptures(in, c));
+                    return prefilterLoop(input, cache, (in, c) -> dfaSearchImpl(in, c, true));
                 }
                 return prefilterLoop(input, cache,
                         (in, c) -> pikeVM.searchCaptures(in, c.pikeVMCache()));
             }
             if (denseDFA != null || forwardDFA != null) {
-                return dfaSearchCaptures(input, cache);
+                return dfaSearchImpl(input, cache, true);
             }
             return pikeVM.searchCaptures(input, cache.pikeVMCache());
         }
 
         /**
-         * Three-phase search: forward DFA finds matchEnd, reverse DFA finds
-         * matchStart, return directly. Matches upstream Rust behavior at
-         * regex-automata/src/dfa/regex.rs:474-534.
+         * Unified DFA search: forward DFA finds matchEnd, then either returns
+         * a two-phase result (wantCaptures=false) or runs the capture engine
+         * on a narrowed window (wantCaptures=true).
+         *
+         * <p>Matches upstream Rust behavior at
+         * regex-automata/src/dfa/regex.rs:474-534.</p>
          *
          * <p>Our DFA implements leftmost-first semantics (via the break-on-Match
          * in computeNextState), so forward and reverse DFA results are correct
          * without PikeVM verification. Falls back to PikeVM when the DFA gives
          * up (e.g., Unicode word boundaries with quit chars).</p>
          */
-        private Captures dfaSearch(Input input, Cache cache) {
+        private Captures dfaSearchImpl(Input input, Cache cache, boolean wantCaptures) {
             long fwdResult;
             if (denseDFA != null) {
                 fwdResult = denseDFA.searchFwd(input);
@@ -177,66 +165,52 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
                 fwdResult = SearchResult.NO_MATCH;
             }
             if (SearchResult.isNoMatch(fwdResult)) return null;
-            if (SearchResult.isGaveUp(fwdResult)) return pikeVM.search(input, cache.pikeVMCache());
+            if (SearchResult.isGaveUp(fwdResult)) {
+                return wantCaptures
+                        ? pikeVM.searchCaptures(input, cache.pikeVMCache())
+                        : pikeVM.search(input, cache.pikeVMCache());
+            }
 
             int matchEnd = SearchResult.matchOffset(fwdResult);
-            if (matchEnd == input.start()) {
-                // Empty match
-                Captures caps = cache.forwardDFACache().scratchCaptures();
-                caps.set(0, matchEnd);
-                caps.set(1, matchEnd);
-                return caps;
-            }
-            if (input.isAnchored()) {
-                Captures caps = cache.forwardDFACache().scratchCaptures();
-                caps.set(0, input.start());
-                caps.set(1, matchEnd);
-                return caps;
-            }
-            if (reverseDFA == null) {
-                Input narrowed = input.withBounds(input.start(), matchEnd, false);
-                return pikeVM.search(narrowed, cache.pikeVMCache());
-            }
-            // Three-phase: reverse DFA finds match start
-            Input revInput = input.withBounds(input.start(), matchEnd, true);
-            long revResult = reverseDFA.searchRevLong(revInput, cache.reverseDFACache());
-            if (SearchResult.isMatch(revResult)) {
-                Captures caps = cache.forwardDFACache().scratchCaptures();
-                caps.set(0, SearchResult.matchOffset(revResult));
-                caps.set(1, matchEnd);
-                return caps;
-            }
-            if (SearchResult.isGaveUp(revResult)) {
-                Input narrowed = input.withBounds(input.start(), matchEnd, false);
-                return pikeVM.search(narrowed, cache.pikeVMCache());
-            }
-            // NoMatch — should not happen, fall back
-            Input narrowed = input.withBounds(input.start(), matchEnd, false);
-            return pikeVM.search(narrowed, cache.pikeVMCache());
-        }
 
-        /**
-         * Three-phase capture search: forward DFA finds matchEnd, reverse DFA
-         * narrows the window, capture engine runs on the narrow window.
-         */
-        private Captures dfaSearchCaptures(Input input, Cache cache) {
-            long fwdResult;
-            if (denseDFA != null) {
-                fwdResult = denseDFA.searchFwd(input);
-                if (SearchResult.isGaveUp(fwdResult)) {
-                    fwdResult = forwardDFA != null
-                            ? forwardDFA.searchFwdLong(input, cache.forwardDFACache())
-                            : SearchResult.NO_MATCH;
+            if (!wantCaptures) {
+                // Two-phase (non-capture) search: forward → reverse → return directly
+                if (matchEnd == input.start()) {
+                    // Empty match
+                    Captures caps = cache.forwardDFACache().scratchCaptures();
+                    caps.set(0, matchEnd);
+                    caps.set(1, matchEnd);
+                    return caps;
                 }
-            } else if (forwardDFA != null) {
-                fwdResult = forwardDFA.searchFwdLong(input, cache.forwardDFACache());
-            } else {
-                fwdResult = SearchResult.NO_MATCH;
+                if (input.isAnchored()) {
+                    Captures caps = cache.forwardDFACache().scratchCaptures();
+                    caps.set(0, input.start());
+                    caps.set(1, matchEnd);
+                    return caps;
+                }
+                if (reverseDFA == null) {
+                    Input narrowed = input.withBounds(input.start(), matchEnd, false);
+                    return pikeVM.search(narrowed, cache.pikeVMCache());
+                }
+                // Three-phase: reverse DFA finds match start, return directly
+                Input revInput = input.withBounds(input.start(), matchEnd, true);
+                long revResult = reverseDFA.searchRevLong(revInput, cache.reverseDFACache());
+                if (SearchResult.isMatch(revResult)) {
+                    Captures caps = cache.forwardDFACache().scratchCaptures();
+                    caps.set(0, SearchResult.matchOffset(revResult));
+                    caps.set(1, matchEnd);
+                    return caps;
+                }
+                if (SearchResult.isGaveUp(revResult)) {
+                    Input narrowed = input.withBounds(input.start(), matchEnd, false);
+                    return pikeVM.search(narrowed, cache.pikeVMCache());
+                }
+                // NoMatch — should not happen, fall back
+                Input narrowed = input.withBounds(input.start(), matchEnd, false);
+                return pikeVM.search(narrowed, cache.pikeVMCache());
             }
-            if (SearchResult.isNoMatch(fwdResult)) return null;
-            if (SearchResult.isGaveUp(fwdResult)) return pikeVM.searchCaptures(input, cache.pikeVMCache());
 
-            int matchEnd = SearchResult.matchOffset(fwdResult);
+            // Three-phase capture search: forward → reverse → capture engine
             if (matchEnd == input.start() || input.isAnchored()) {
                 Input narrowed = input.withBounds(input.start(), matchEnd, false);
                 return captureEngine(narrowed, cache);
@@ -263,11 +237,14 @@ public sealed interface Strategy permits Strategy.Core, Strategy.PrefilterOnly,
             return captureEngine(narrowed, cache);
         }
 
-        /**
-         * Selects the best capture engine for the given narrowed, anchored window.
-         * Prefers one-pass DFA (single scan with captures) when available, then
-         * bounded backtracker for small windows, then PikeVM as fallback.
-         */
+        private Captures dfaSearch(Input input, Cache cache) {
+            return dfaSearchImpl(input, cache, false);
+        }
+
+        private Captures dfaSearchCaptures(Input input, Cache cache) {
+            return dfaSearchImpl(input, cache, true);
+        }
+
         /**
          * Selects the best capture engine for the given narrowed window.
          * Prefers one-pass DFA when the window is precisely narrowed (anchored),
