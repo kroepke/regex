@@ -190,18 +190,30 @@ Per-state `boolean[128]` escape tables for dense DFA states where ≤3 equivalen
 - Key wins vs S12: charClass **+9%** (94 → 102), captures **+25%** (16.7k → 20.9k, regression fixed), rawCharClass **+5%** (105 → 110)
 - Key wins vs S11 baseline: charClass **+27%**, unicodeWord **+22%**, captures **+14%**, rawCharClass **+24%**, rawUnicodeWord **+61%**
 
+### stage-14-multi-start (`0b70a57`)
+**Multi-position start states for dense DFA**
+
+Enables the dense DFA for patterns with look-assertions (`^`, `$`, `\b`) by supporting 10 start states (5 `Start` variants × anchored/unanchored). Removes the `lookSetAny.isEmpty()` guard from `DenseDFABuilder`.
+
+Key design change: switched from range-based match detection (`sid >= minMatchState`) to MATCH_FLAG-based detection (`sid < 0`) in `DenseDFA.searchFwd`. This is necessary because look-assertion patterns have conditional matches where a state may be a match only on certain transitions (depending on look-ahead context). Range-based detection would incorrectly signal matches regardless of context.
+
+- Engines: unchanged from stage 13
+- Tests: 2,201 total, 0 failures
+- Key wins vs S13: rawMultiline **+10%** (214 → 237), multiline **+5%** (215 → 228), wordRepeat **+4%** (96k → 100k)
+- Trade-off: charClass **-8%** (102 → 94) from MATCH_FLAG per-transition overhead. Future optimization: use range-based detection for patterns without look-assertions, MATCH_FLAG for patterns with them.
+
 ## Benchmark Comparison (same machine, 2026-03-15/16/17)
 
-| Benchmark | S1 | S6 | S8 | S9 | S10 | S11 | S12 | **S13** | JDK | **vs JDK** |
+| Benchmark | S1 | S6 | S9 | S10 | S11 | S12 | S13 | **S14** | JDK | **vs JDK** |
 |---|---|---|---|---|---|---|---|---|---|---|
-| literal (ops/s) | 14 | 4,663 | 4,569 | 3,326 | 4,787 | 4,880 | 4,956 | **4,821** | 3,268 | **1.48x** |
-| charClass | 0.06 | 70.6 | 76.1 | 60.9 | 81.4 | 83.5 | 94 | **102** | 285 | 2.8x |
-| alternation | 6.5 | 45.0 | 44.4 | 39.0 | 44.1 | 45.3 | 46.5 | **46.5** | 106 | 2.3x |
-| captures | 60 | 350 | 366 | 12,362 | 16,928 | 18,190 | 16,499 | **20,939** | 19,012 | **1.10x** |
-| unicodeWord | 13 | 18.3 | 13,945 | 11,291 | 15,267 | 15,037 | 19,807 | **19,264** | 32,603 | 1.7x |
-| multiline | — | — | 211 | 192 | 233 | 215 | 215 | **215** | 1,036 | 4.8x |
-| literalMiss | — | — | 4,964 | 3,982 | 5,107 | 5,223 | 5,252 | **5,147** | 2,582 | **1.99x** |
-| wordRepeat | — | — | 94,535 | 85,364 | 93,662 | 90,326 | 92,508 | **96,098** | 11,373 | **8.4x** |
+| literal (ops/s) | 14 | 4,663 | 3,326 | 4,787 | 4,880 | 4,956 | 4,821 | **4,955** | 2,564 | **1.93x** |
+| charClass | 0.06 | 70.6 | 60.9 | 81.4 | 83.5 | 94 | 102 | **94** | 289 | 3.1x |
+| alternation | 6.5 | 45.0 | 39.0 | 44.1 | 45.3 | 46.5 | 46.5 | **46.5** | 105 | 2.3x |
+| captures | 60 | 350 | 12,362 | 16,928 | 18,190 | 16,499 | 20,939 | **20,329** | 18,831 | **1.08x** |
+| unicodeWord | 13 | 18.3 | 11,291 | 15,267 | 15,037 | 19,807 | 19,264 | **18,527** | 38,147 | 2.1x |
+| multiline | — | — | 192 | 233 | 215 | 215 | 215 | **228** | 1,034 | 4.5x |
+| literalMiss | — | — | 3,982 | 5,107 | 5,223 | 5,252 | 5,147 | **5,104** | 3,248 | **1.57x** |
+| wordRepeat | — | — | 85,364 | 93,662 | 90,326 | 92,508 | 96,098 | **100,114** | 11,246 | **8.9x** |
 
 Notes:
 - S4 unicodeWord (15,717) was based on three-phase with DFA edge bugs (27 test failures). S7 unicodeWord (13,499) is fully correct.
