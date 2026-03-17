@@ -402,6 +402,7 @@ public final class DenseDFABuilder {
         // Acceleration analysis
         int classCount = charClasses.classCount();
         boolean[][] accelTables = new boolean[denseStates][];
+        char[] accelEscapeChars = new char[denseStates];  // '\0' means use table scan
         for (int i = 0; i < denseStates; i++) {
             int sid = i * stride;
             if (sid == newDead || sid == newQuit || i == 0) continue;
@@ -425,12 +426,25 @@ public final class DenseDFABuilder {
                     }
                 }
                 accelTables[i] = table;
+
+                // Count ASCII escape chars to detect single-escape states
+                int escapeCharCount = 0;
+                char singleEscape = 0;
+                for (int c = 0; c < 128; c++) {
+                    if (table[c]) {
+                        escapeCharCount++;
+                        singleEscape = (char) c;
+                    }
+                }
+                if (escapeCharCount == 1) {
+                    accelEscapeChars[i] = singleEscape;
+                }
             }
         }
 
         return new DenseDFA(newTable, charClasses,
                 newStartStates,
                 minMatchState, newDead, newQuit, denseStates, accelTables,
-                needsDeadMatch ? newDeadMatch : -1);
+                accelEscapeChars, needsDeadMatch ? newDeadMatch : -1);
     }
 }

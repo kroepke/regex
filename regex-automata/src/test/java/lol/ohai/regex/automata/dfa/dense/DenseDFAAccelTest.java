@@ -79,6 +79,18 @@ class DenseDFAAccelTest {
         assertEquals(26, SearchResult.matchOffset(result));  // first word ends at 26
     }
 
+    @Test
+    void indexOfAccelerationForMultiline() throws Exception {
+        DenseDFA dfa = buildDense("(?m)^.+$");
+        assertNotNull(dfa);
+        // Multiline: .+ escapes on \n only → should use indexOf('\n')
+
+        String input = "first line\nsecond line\nthird line";
+        long result = dfa.searchFwd(Input.of(input));
+        assertTrue(SearchResult.isMatch(result));
+        assertEquals(10, SearchResult.matchOffset(result));  // "first line" ends at 10
+    }
+
     private static DenseDFA buildDense(String pattern) throws Exception {
         Ast ast = Parser.parse(pattern, 250);
         Hir hir = Translator.translate(pattern, ast);

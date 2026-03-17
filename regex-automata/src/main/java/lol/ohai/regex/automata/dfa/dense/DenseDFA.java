@@ -32,12 +32,13 @@ public final class DenseDFA {
     private final int stateCount;
     private final int stride;
     private final boolean[][] accelTables;  // indexed by sid / stride; null entry = not accelerated
+    private final char[] accelEscapeChars;  // indexed by sid / stride; '\0' means use table scan
     private final int deadMatch;  // synthetic dead-match state, or -1
 
     DenseDFA(int[] transTable, CharClasses charClasses,
              int[] startStates,
              int minMatchState, int dead, int quit, int stateCount,
-             boolean[][] accelTables, int deadMatch) {
+             boolean[][] accelTables, char[] accelEscapeChars, int deadMatch) {
         this.transTable = transTable;
         this.charClasses = charClasses;
         this.startStates = startStates;
@@ -47,6 +48,7 @@ public final class DenseDFA {
         this.stateCount = stateCount;
         this.stride = charClasses.stride();
         this.accelTables = accelTables;
+        this.accelEscapeChars = accelEscapeChars;
         this.deadMatch = deadMatch;
     }
 
@@ -141,6 +143,9 @@ public final class DenseDFA {
         if (sid >= mms && sid != dm) lastMatchEnd = at;
 
         final boolean[][] accel = accelTables;
+        final char[] escChars = accelEscapeChars;
+        // Lazily computed String view of haystack; only used when indexOf acceleration fires.
+        String haystackString = null;
         while (at < end) {
             // Acceleration: fast-scan self-looping states.
             // Self-loop transitions don't change the DFA state, so we scan
@@ -149,12 +154,26 @@ public final class DenseDFA {
             if (escTable != null) {
                 // If we're in a match state, extend match through the self-loop scan
                 if (sid >= mms) lastMatchEnd = at;
-                // Scan: 1 array load per char
-                while (at < end) {
-                    char c = haystack[at];
-                    if (c >= 128 || escTable[c]) break;
-                    at++;
+
+                char esc = escChars[sid / stride];
+                if (esc != 0) {
+                    // Single-escape-char state: use SIMD-intrinsified String.indexOf
+                    if (haystackString == null) haystackString = input.haystackStr();
+                    int found = haystackString.indexOf(esc, at);
+                    if (found < 0 || found >= end) {
+                        at = end;
+                    } else {
+                        at = found;
+                    }
+                } else {
+                    // Multi-escape state: table-based scan (1 array load per char)
+                    while (at < end) {
+                        char c = haystack[at];
+                        if (c >= 128 || escTable[c]) break;
+                        at++;
+                    }
                 }
+
                 if (sid >= mms) lastMatchEnd = at;
                 if (at >= end) break;
             }
