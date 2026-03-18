@@ -189,15 +189,6 @@ public final class DenseDFA {
         String haystackString = null;
 
         while (at < end) {
-            // 1-char match delay: if we're currently in a match state
-            // (including dead-match), record match at current position BEFORE
-            // consuming the next char. This replicates the lazy DFA's
-            // MATCH_FLAG behavior where transitions FROM match states carry
-            // the match signal.
-            if (sid >= minMatch && sid <= maxMatch) {
-                lastMatchEnd = at;
-            }
-
             // UNROLLED INNER LOOP — single guard, no accel
             while (at < end) {
                 sid = tt[sid + cc.classify(haystack[at])];
@@ -214,19 +205,26 @@ public final class DenseDFA {
                 at++;
             }
 
-            // SPECIAL-STATE DISPATCH
+            // SPECIAL-STATE DISPATCH (cold path)
+            // Ref: upstream search.rs:125-181
+            //
+            // Match recording uses at+1 (exclusive end): the char at position
+            // 'at' was consumed INTO the match state, so the match includes it.
+            // Dead-match uses 'at' (look-ahead semantics: the char at 'at'
+            // confirmed the match but is NOT part of it).
             if (sid <= ms) {
                 if (sid >= minMatch && sid <= maxMatch) {
                     if (sid == dm) {
                         lastMatchEnd = at;
                         break;
                     }
-                    lastMatchEnd = at;
+                    lastMatchEnd = at + 1;
                     if (sid >= minAccel && sid <= maxAccel) {
                         if (haystackString == null) haystackString = input.haystackStr();
                         at = accelerate(sid, haystack, haystackString, at, end);
-                        // Update match through the accelerated range: the match
-                        // state self-looped through all skipped positions.
+                        // Accel scanned through self-loop chars. 'at' is now
+                        // at the escape char (or end). The exclusive match end
+                        // is 'at' (all chars before it were self-loop/match).
                         lastMatchEnd = at;
                         if (at >= end) break;
                         sid = tt[sid + cc.classify(haystack[at])];
@@ -238,13 +236,13 @@ public final class DenseDFA {
                     at = accelerate(sid, haystack, haystackString, at, end);
                     if (at >= end) break;
                     sid = tt[sid + cc.classify(haystack[at])];
-                    // If the post-accel transition leads to a match state,
-                    // record match at the escape char position and handle it.
+                    // Post-accel transition may enter a match state.
                     if (sid >= minMatch && sid <= maxMatch) {
-                        lastMatchEnd = at;
                         if (sid == dm) {
+                            lastMatchEnd = at;
                             break;
                         }
+                        lastMatchEnd = at + 1;
                     }
                     at++;
                     continue;
@@ -255,14 +253,6 @@ public final class DenseDFA {
                 }
             }
             at++;
-        }
-
-        // If we exited the loop while still in a match state, the match
-        // extends to `at` (position after the last consumed char). This
-        // handles the match-delay for the final iteration where the loop
-        // exits before the match-delay at the top can run.
-        if (sid >= minMatch && sid <= maxMatch) {
-            lastMatchEnd = at;
         }
 
         lastMatchEnd = handleRightEdge(sid, haystack, end, lastMatchEnd);
