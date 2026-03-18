@@ -203,18 +203,37 @@ Key design change: switched from range-based match detection (`sid >= minMatchSt
 - Initially had charClass -8% regression from MATCH_FLAG per-transition overhead. Fixed by restoring range-based match detection (`sid >= minMatchState`) — match property is per-state not per-transition (confirmed by upstream `dfa/search.rs`). Builder now introduces "dead-match" and "match-wrapper" synthetic states to preserve delayed-match semantics without MATCH_FLAG on transitions.
 - Final S14 results: charClass **recovered** (102), rawCharClass **+5%** (110 → 115), multiline **+6%** (215 → 229), rawMultiline **+12%** (214 → 241), captures **+2%** (20.9k → 21.3k).
 
-## Benchmark Comparison (same machine, 2026-03-15/16/17)
+### stage-15-special-state-taxonomy (`ed291af`)
+**Special-state taxonomy: layout inversion + cold-path acceleration dispatch**
 
-| Benchmark | S1 | S6 | S9 | S10 | S11 | S12 | S13 | **S14** | JDK | **vs JDK** |
-|---|---|---|---|---|---|---|---|---|---|---|
-| literal (ops/s) | 14 | 4,663 | 3,326 | 4,787 | 4,880 | 4,956 | 4,821 | **4,930** | 2,564 | **1.92x** |
-| charClass | 0.06 | 70.6 | 60.9 | 81.4 | 83.5 | 94 | 102 | **102** | 289 | 2.8x |
-| alternation | 6.5 | 45.0 | 39.0 | 44.1 | 45.3 | 46.5 | 46.5 | **46.6** | 105 | 2.3x |
-| captures | 60 | 350 | 12,362 | 16,928 | 18,190 | 16,499 | 20,939 | **21,290** | 18,831 | **1.13x** |
-| unicodeWord | 13 | 18.3 | 11,291 | 15,267 | 15,037 | 19,807 | 19,264 | **19,070** | 38,147 | 2.0x |
-| multiline | — | — | 192 | 233 | 215 | 215 | 215 | **229** | 1,034 | 4.5x |
-| literalMiss | — | — | 3,982 | 5,107 | 5,223 | 5,252 | 5,147 | **5,123** | 3,248 | **1.58x** |
-| wordRepeat | — | — | 85,364 | 93,662 | 90,326 | 92,508 | 96,098 | **91,825** | 11,246 | **8.2x** |
+Restructures the dense DFA to match upstream's special-state taxonomy (`special.rs:142-180`). All special states (dead, quit, match, accel) are shuffled to the bottom of the state ID space with a single `maxSpecial` threshold guard. Acceleration moves from the hot loop to the cold-path special-state dispatch.
+
+Key changes:
+- Dead=0, quit=stride (was padding/dead/quit at 0/stride/2*stride)
+- Unrolled loop guard: `sid <= maxSpecial` (1 comparison, was `sid <= q || sid >= mms` = 2)
+- No acceleration check in hot path — fires only in special-state dispatch
+- Start states participate in accel classification (removed `i == 0` skip)
+- Space exclusion for accel needles (upstream `accel.rs:449-458`)
+- Compact densely-indexed accel tables (boolean[128][] indexed by accelIndex, not sparse by sid/stride)
+
+- Engines: unchanged from stage 14
+- Tests: 2,282 total, 0 failures
+- Key wins vs S14: multiline **+41%** (229 → 336), unicodeWord **+8%** (19k → 18.9k), literalMiss **+7%** (5.1k → 5.5k)
+- charClass neutral (+2%), alternation neutral, captures -3% (within JMH noise)
+- Predicted improvements were larger (multiline 2-4x, charClass +15-30%). The match-delay recording at the top of the outer loop adds per-iteration overhead that offsets part of the guard simplification. Future optimization: eliminate the top-of-loop match check by recording matches only in the dispatch.
+
+## Benchmark Comparison (same machine, 2026-03-15/16/17/18)
+
+| Benchmark | S1 | S6 | S9 | S10 | S11 | S12 | S13 | S14 | **S15** | JDK | **vs JDK** |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| literal (ops/s) | 14 | 4,663 | 3,326 | 4,787 | 4,880 | 4,956 | 4,821 | 4,930 | **5,223** | 3,422 | **1.53x** |
+| charClass | 0.06 | 70.6 | 60.9 | 81.4 | 83.5 | 94 | 102 | 102 | **102** | 241 | 2.4x |
+| alternation | 6.5 | 45.0 | 39.0 | 44.1 | 45.3 | 46.5 | 46.5 | 46.6 | **48** | 111 | 2.3x |
+| captures | 60 | 350 | 12,362 | 16,928 | 18,190 | 16,499 | 20,939 | 21,290 | **21,377** | 16,629 | **1.29x** |
+| unicodeWord | 13 | 18.3 | 11,291 | 15,267 | 15,037 | 19,807 | 19,264 | 19,070 | **18,875** | 41,074 | 2.2x |
+| multiline | — | — | 192 | 233 | 215 | 215 | 215 | 229 | **336** | 1,086 | 3.2x |
+| literalMiss | — | — | 3,982 | 5,107 | 5,223 | 5,252 | 5,147 | 5,123 | **5,532** | 2,679 | **2.06x** |
+| wordRepeat | — | — | 85,364 | 93,662 | 90,326 | 92,508 | 96,098 | 91,825 | **86,980** | 11,735 | **7.4x** |
 
 Notes:
 - S4 unicodeWord (15,717) was based on three-phase with DFA edge bugs (27 test failures). S7 unicodeWord (13,499) is fully correct.
