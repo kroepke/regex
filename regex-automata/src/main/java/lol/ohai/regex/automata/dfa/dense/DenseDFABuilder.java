@@ -20,12 +20,12 @@ import java.util.Deque;
  *   <li>Computes start states (anchored + unanchored)</li>
  *   <li>Drives a worklist: for each state, calls
  *       {@link LazyDFA#computeAllTransitions} to compute all transitions</li>
- *   <li>After all states are discovered, identifies match states via
- *       StateContent.isMatch()</li>
- *   <li>Shuffles match states to the end for range-check detection
- *       ({@code sid >= minMatchState})</li>
+ *   <li>After all states are discovered, classifies states into categories:
+ *       match-only, match+accel, accel-only, normal</li>
+ *   <li>Shuffles states into the special-state taxonomy layout: dead(0),
+ *       quit(stride), match, accel, then normal states</li>
  *   <li>Copies into a flat {@code int[]} table (MATCH_FLAG stripped from
- *       all transitions; match detection uses range-based sid >= minMatchState)</li>
+ *       all transitions; match detection uses range-based checks)</li>
  * </ol>
  *
  * <p>Returns {@code null} if the pattern exceeds the state limit or has
@@ -133,7 +133,7 @@ public final class DenseDFABuilder {
             }
         }
 
-        // Extract into dense table with match-state shuffling
+        // Extract into dense table with special-state taxonomy layout
         return extractDense(cache, charClasses, startStates, dead, quit, stride);
     }
 
@@ -187,53 +187,36 @@ public final class DenseDFABuilder {
     }
 
     /**
-     * Extracts the fully-computed DFACache into a flat int[] with match states
-     * shuffled to the end.
+     * Extracts the fully-computed DFACache into a flat int[] with the
+     * special-state taxonomy layout.
      *
-     * <p>Layout: padding at 0, dead at stride, quit at stride*2, then real
-     * states. Match states are shuffled to higher IDs so that
-     * {@code sid >= minMatchState} indicates a match. All transition targets
-     * are remapped and MATCH_FLAG is stripped.</p>
+     * <p>Layout: dead at 0, quit at stride, then match-only, match+accel,
+     * accel-only, normal states. All special states (dead, quit, match, accel)
+     * are at the bottom of the ID space, with {@code maxSpecial} as the
+     * single threshold guard.</p>
      *
-     * <p>Transitions that were {@code dead | MATCH_FLAG} in the lazy DFA
-     * (signaling "source was a match, transition to dead") are remapped to a
-     * synthetic "dead-match" state. This state behaves like dead (all
-     * transitions point to dead) but has sid >= minMatchState, preserving the
-     * match signal for range-based detection. This is needed for patterns
-     * with end-assertions ($, \z) where the EOI transition resolves the
-     * look-ahead and confirms the match.</p>
+     * <p>Ref: upstream/regex/regex-automata/src/dfa/special.rs:142-180,
+     * upstream/regex/regex-automata/src/dfa/search.rs:98-181,
+     * upstream/regex/regex-automata/src/dfa/accel.rs:449-458</p>
      */
     private static DenseDFA extractDense(DFACache cache, CharClasses charClasses,
                                           int[] startStates,
                                           int dead, int quit, int stride) {
         int totalStates = cache.stateCount(); // includes padding, dead, quit
+        int classCount = charClasses.classCount();
+        int eoiClass = charClasses.eoiClass();
 
-        // Phase 1: Scan transitions for MATCH_FLAG signals that require
-        // synthetic states.
-        //
-        // MATCH_FLAG on a transition means "the source resolved to a match via
-        // look-ahead." Two cases need synthetic states:
-        //
-        // (a) dead|MATCH_FLAG: "match confirmed, then dead." We create one
-        //     dead-match state that acts like dead but sid >= minMatchState.
-        //
-        // (b) target|MATCH_FLAG where target is a real non-match state AND
-        //     source is NOT isMatch(): "conditional match from look-ahead
-        //     resolution, continue to target." We create match-wrapper states
-        //     that mirror the target's transitions but are in the match range.
-        //     This happens for patterns with end-assertions like (?m)^.+$
-        //     where $ is resolved per-transition.
+        // ================================================================
+        // Phase 1: Match-wrapper detection (unchanged from previous impl)
+        // ================================================================
 
-        // Pass 1: check if dead-match is needed. Dead-match is required when
-        // dead|MATCH_FLAG appears on transitions from non-match sources, OR
-        // on EOI transitions from any source (handleRightEdge needs it).
+        // Pass 1a: check if dead-match is needed
         boolean needsDeadMatch = false;
         int deadWithFlagVal = dead | DFACache.MATCH_FLAG;
-        int eoiClass = charClasses.eoiClass();
         for (int i = 3; i < totalStates && !needsDeadMatch; i++) {
             int rawSid = i * stride;
             boolean sourceMatch = cache.getState(rawSid).isMatch();
-            for (int cls = 0; cls <= charClasses.classCount(); cls++) {
+            for (int cls = 0; cls <= classCount; cls++) {
                 if (cache.nextState(rawSid, cls) == deadWithFlagVal) {
                     if (!sourceMatch || cls == eoiClass) {
                         needsDeadMatch = true;
@@ -243,7 +226,7 @@ public final class DenseDFABuilder {
             }
         }
 
-        // Pass 2: find targets needing match-wrappers
+        // Pass 1b: find targets needing match-wrappers
         int[] matchWrapperMap = new int[totalStates];
         java.util.Arrays.fill(matchWrapperMap, -1);
         int wrapperCount = 0;
@@ -252,8 +235,8 @@ public final class DenseDFABuilder {
         for (int i = 3; i < totalStates; i++) {
             int rawSid = i * stride;
             boolean sourceIsMatch = cache.getState(rawSid).isMatch();
-            if (sourceIsMatch) continue; // match states already handle MATCH_FLAG
-            for (int cls = 0; cls <= charClasses.classCount(); cls++) {
+            if (sourceIsMatch) continue;
+            for (int cls = 0; cls <= classCount; cls++) {
                 int target = cache.nextState(rawSid, cls);
                 if ((target & DFACache.MATCH_FLAG) == 0) continue;
                 int rawTarget = target & 0x7FFF_FFFF;
@@ -273,122 +256,215 @@ public final class DenseDFABuilder {
         int denseStates = totalStates + extraStates;
         int deadMatchIdx = needsDeadMatch ? totalStates : -1;
 
-        // Phase 2: Identify match states.
+        // ================================================================
+        // Phase 2: Identify match states
+        // ================================================================
         boolean[] isMatch = new boolean[denseStates];
-        int matchCount = 0;
         for (int i = 3; i < totalStates; i++) {
             int rawSid = i * stride;
             if (cache.getState(rawSid).isMatch()) {
                 isMatch[i] = true;
-                matchCount++;
             }
         }
         if (needsDeadMatch) {
             isMatch[deadMatchIdx] = true;
-            matchCount++;
         }
-        // Match-wrapper states are match states
         for (int i = 0; i < totalStates; i++) {
             if (matchWrapperMap[i] >= 0) {
                 isMatch[matchWrapperMap[i]] = true;
-                matchCount++;
             }
         }
 
-        // Phase 3: Build remap table.
-        int[] remap = new int[denseStates];
-        remap[0] = 0;
-        remap[1] = stride;
-        remap[2] = stride * 2;
+        // ================================================================
+        // Phase 3: Acceleration classification (BEFORE remap)
+        // ================================================================
+        // For each original state, count escape classes (transitions that
+        // don't self-loop). <=3 means acceleratable.
+        // Space exclusion: if space (' ', U+0020) is an escape char, skip.
+        // Ref: upstream/regex/regex-automata/src/dfa/accel.rs:449-458
+        boolean[] isAccel = new boolean[denseStates];
 
-        int nonMatchNext = 3;
-        int matchNext = denseStates - matchCount;
+        for (int i = 3; i < totalStates; i++) {
+            int rawSid = i * stride;
+            int escapeCount = 0;
+            boolean tooMany = false;
+            boolean hasSpaceEscape = false;
+
+            for (int cls = 0; cls < classCount; cls++) {
+                int target = cache.nextState(rawSid, cls) & 0x7FFF_FFFF;
+                if (target != rawSid) {
+                    escapeCount++;
+                    if (escapeCount > 3) { tooMany = true; break; }
+                }
+            }
+
+            if (!tooMany && escapeCount > 0) {
+                // Check space exclusion: classify space and see if it's an escape
+                int spaceClass = charClasses.classify(' ');
+                int spaceTarget = cache.nextState(rawSid, spaceClass) & 0x7FFF_FFFF;
+                hasSpaceEscape = (spaceTarget != rawSid);
+
+                if (!hasSpaceEscape) {
+                    isAccel[i] = true;
+                }
+            }
+        }
+
+        // Propagate accel status to match-wrapper states
+        for (int i = 0; i < totalStates; i++) {
+            if (matchWrapperMap[i] >= 0 && isAccel[i]) {
+                isAccel[matchWrapperMap[i]] = true;
+            }
+        }
+
+        // Dead-match is never accel (all transitions point to dead = all escapes)
+
+        // ================================================================
+        // Phase 4: Classify and count states per category
+        // ================================================================
+        // Categories: match-only, match+accel, accel-only, normal
+        int matchOnlyCount = 0;
+        int matchAccelCount = 0;
+        int accelOnlyCount = 0;
 
         for (int i = 3; i < denseStates; i++) {
-            if (isMatch[i]) {
-                remap[i] = matchNext * stride;
-                matchNext++;
+            boolean m = isMatch[i];
+            boolean a = isAccel[i];
+            if (m && a) matchAccelCount++;
+            else if (m) matchOnlyCount++;
+            else if (a) accelOnlyCount++;
+        }
+
+        // ================================================================
+        // Phase 5: Build remap table with new shuffle order
+        // ================================================================
+        // Layout: dead(0) → quit(stride) → match-only → match+accel → accel-only → normal
+        int[] remap = new int[denseStates];
+        remap[0] = 0;       // padding → dead
+        remap[1] = 0;       // old dead → new dead at 0
+        remap[2] = stride;  // old quit → new quit at stride
+
+        // Assign positions for each category
+        int nextMatchOnly = 2;  // starts after quit (index 2 → sid = 2*stride)
+        int nextMatchAccel = nextMatchOnly + matchOnlyCount;
+        int nextAccelOnly = nextMatchAccel + matchAccelCount;
+        int nextNormal = nextAccelOnly + accelOnlyCount;
+
+        // Track current position in each category
+        int curMatchOnly = nextMatchOnly;
+        int curMatchAccel = nextMatchAccel;
+        int curAccelOnly = nextAccelOnly;
+        int curNormal = nextNormal;
+
+        for (int i = 3; i < denseStates; i++) {
+            boolean m = isMatch[i];
+            boolean a = isAccel[i];
+            if (m && a) {
+                remap[i] = curMatchAccel * stride;
+                curMatchAccel++;
+            } else if (m) {
+                remap[i] = curMatchOnly * stride;
+                curMatchOnly++;
+            } else if (a) {
+                remap[i] = curAccelOnly * stride;
+                curAccelOnly++;
             } else {
-                remap[i] = nonMatchNext * stride;
-                nonMatchNext++;
+                remap[i] = curNormal * stride;
+                curNormal++;
             }
         }
 
-        int minMatchState = (denseStates - matchCount) * stride;
+        // Compute range boundaries
+        int minMatch, maxMatch;
+        if (matchOnlyCount + matchAccelCount > 0) {
+            minMatch = nextMatchOnly * stride;
+            maxMatch = (nextMatchAccel + matchAccelCount - 1) * stride;
+        } else {
+            minMatch = -1;
+            maxMatch = -2;  // trivially false range check
+        }
+
+        int minAccel, maxAccel;
+        if (matchAccelCount + accelOnlyCount > 0) {
+            minAccel = nextMatchAccel * stride;
+            maxAccel = (nextAccelOnly + accelOnlyCount - 1) * stride;
+        } else {
+            minAccel = -1;
+            maxAccel = -2;
+        }
+
+        int maxSpecial = Math.max(maxMatch, maxAccel);
+        // If no match and no accel states, maxSpecial should be quit (stride)
+        if (maxSpecial < stride) {
+            maxSpecial = stride;
+        }
+
         int newDeadMatch = needsDeadMatch ? remap[deadMatchIdx] : -1;
 
+        // ================================================================
+        // Phase 6: Build the new transition table
+        // ================================================================
+        int[] newTable = new int[denseStates * stride];
+
+        // Dead (at 0): all transitions → 0
+        for (int cls = 0; cls <= classCount; cls++) {
+            newTable[cls] = 0;
+        }
+
+        // Quit (at stride): all transitions → stride
+        for (int cls = 0; cls <= classCount; cls++) {
+            newTable[stride + cls] = stride;
+        }
+
+        // Dead-match: all transitions → dead (0)
+        if (needsDeadMatch) {
+            for (int cls = 0; cls <= classCount; cls++) {
+                newTable[newDeadMatch + cls] = 0;
+            }
+        }
+
+        // Copy real states, handling MATCH_FLAG
         // Build match-wrapper remap: old target state index → new match-wrapper sid
         int[] wrapperNewSid = new int[totalStates];
         for (int i = 0; i < totalStates; i++) {
             wrapperNewSid[i] = (matchWrapperMap[i] >= 0) ? remap[matchWrapperMap[i]] : -1;
         }
 
-        // Phase 4: Build the new transition table.
-        int[] newTable = new int[denseStates * stride];
-
-        // Dead: all transitions → dead
-        int newDead = remap[1];
-        for (int cls = 0; cls <= charClasses.classCount(); cls++) {
-            newTable[newDead + cls] = newDead;
-        }
-
-        // Quit: all transitions → quit
-        int newQuit = remap[2];
-        for (int cls = 0; cls <= charClasses.classCount(); cls++) {
-            newTable[newQuit + cls] = newQuit;
-        }
-
-        // Dead-match: all transitions → dead
-        if (needsDeadMatch) {
-            for (int cls = 0; cls <= charClasses.classCount(); cls++) {
-                newTable[newDeadMatch + cls] = newDead;
-            }
-        }
-
-        // Copy real states, handling MATCH_FLAG.
         for (int i = 3; i < totalStates; i++) {
             int oldRawSid = i * stride;
             int newSid = remap[i];
             boolean sourceIsMatch = cache.getState(oldRawSid).isMatch();
 
-            for (int cls = 0; cls <= charClasses.classCount(); cls++) {
+            for (int cls = 0; cls <= classCount; cls++) {
                 int target = cache.nextState(oldRawSid, cls);
                 boolean hasFlag = (target & DFACache.MATCH_FLAG) != 0;
                 int rawTarget = target & 0x7FFF_FFFF;
 
-                if (hasFlag && rawTarget == dead && (!sourceIsMatch || cls == charClasses.eoiClass())) {
-                    // dead|MATCH_FLAG → dead-match when:
-                    // - source is NOT a match state (look-ahead resolution), OR
-                    // - this is the EOI transition (handleRightEdge needs it)
+                if (hasFlag && rawTarget == dead && (!sourceIsMatch || cls == eoiClass)) {
                     newTable[newSid + cls] = newDeadMatch;
                 } else if (hasFlag && rawTarget == dead) {
-                    // dead|MATCH_FLAG from match source on non-EOI → plain dead.
-                    // The match single-step records the match before transitioning.
-                    newTable[newSid + cls] = newDead;
+                    newTable[newSid + cls] = 0;  // dead is now 0
                 } else if (hasFlag && !sourceIsMatch) {
-                    // Conditional match from look-ahead. Target needs wrapper.
                     int targetIdx = rawTarget / stride;
                     if (targetIdx >= 3 && targetIdx < totalStates
                             && wrapperNewSid[targetIdx] >= 0) {
                         newTable[newSid + cls] = wrapperNewSid[targetIdx];
                     } else {
-                        // Target is already a match state or target wrapper
-                        // wasn't created — use normal remap
-                        newTable[newSid + cls] = (targetIdx < totalStates) ? remap[targetIdx] : newDead;
+                        newTable[newSid + cls] = (targetIdx < totalStates) ? remap[targetIdx] : 0;
                     }
                 } else {
                     int targetIdx = rawTarget / stride;
-                    newTable[newSid + cls] = (targetIdx < totalStates) ? remap[targetIdx] : newDead;
+                    newTable[newSid + cls] = (targetIdx < totalStates) ? remap[targetIdx] : 0;
                 }
             }
         }
 
-        // Copy match-wrapper states: same transitions as their original targets.
+        // Copy match-wrapper states: same transitions as their original targets
         for (int i = 3; i < totalStates; i++) {
             if (matchWrapperMap[i] < 0) continue;
-            int wrapperSid = remap[matchWrapperMap[i]];
+            int wrapSid = remap[matchWrapperMap[i]];
             int originalSid = remap[i];
-            System.arraycopy(newTable, originalSid, newTable, wrapperSid, stride);
+            System.arraycopy(newTable, originalSid, newTable, wrapSid, stride);
         }
 
         // Remap start states
@@ -399,33 +475,33 @@ public final class DenseDFABuilder {
             newStartStates[i] = (stateIdx < remap.length) ? remap[stateIdx] : rawSid;
         }
 
-        // Acceleration analysis
-        int classCount = charClasses.classCount();
-        boolean[][] accelTables = new boolean[denseStates][];
-        char[] accelEscapeChars = new char[denseStates];  // '\0' means use table scan
-        for (int i = 0; i < denseStates; i++) {
-            int sid = i * stride;
-            if (sid == newDead || sid == newQuit || i == 0) continue;
-            if (needsDeadMatch && sid == newDeadMatch) continue;
+        // ================================================================
+        // Phase 7: Build acceleration tables from the REMAPPED transition table
+        // ================================================================
+        // For each accel state, build a boolean[128] escape table (true for
+        // ASCII chars that are escape chars) and detect single-escape-char
+        // states for indexOf optimization.
+        boolean[][] accelTablesArr = null;
+        char[] accelSingleEscapeArr = null;
+        if (matchAccelCount + accelOnlyCount > 0) {
+            int accelCount = matchAccelCount + accelOnlyCount;
+            accelTablesArr = new boolean[accelCount][];
+            accelSingleEscapeArr = new char[accelCount];
 
-            int escapes = 0;
-            boolean tooMany = false;
-            for (int cls = 0; cls < classCount; cls++) {
-                if (newTable[sid + cls] != sid) {
-                    escapes++;
-                    if (escapes > 3) { tooMany = true; break; }
-                }
-            }
+            for (int i = 3; i < denseStates; i++) {
+                if (!isAccel[i]) continue;
+                int newSid = remap[i];
+                int accelIdx = (newSid - minAccel) / stride;
 
-            if (!tooMany) {
+                // Build boolean[128] escape table
                 boolean[] table = new boolean[128];
                 for (int c = 0; c < 128; c++) {
                     int cls = charClasses.classify((char) c);
-                    if (newTable[sid + cls] != sid) {
+                    if (newTable[newSid + cls] != newSid) {
                         table[c] = true;
                     }
                 }
-                accelTables[i] = table;
+                accelTablesArr[accelIdx] = table;
 
                 // Count ASCII escape chars to detect single-escape states
                 int escapeCharCount = 0;
@@ -437,14 +513,16 @@ public final class DenseDFABuilder {
                     }
                 }
                 if (escapeCharCount == 1) {
-                    accelEscapeChars[i] = singleEscape;
+                    accelSingleEscapeArr[accelIdx] = singleEscape;
                 }
             }
         }
 
-        return new DenseDFA(newTable, charClasses,
-                newStartStates,
-                minMatchState, newDead, newQuit, denseStates, accelTables,
-                accelEscapeChars, needsDeadMatch ? newDeadMatch : -1);
+        return new DenseDFA(newTable, charClasses, newStartStates,
+                0, stride,  // dead=0, quit=stride
+                minMatch, maxMatch, minAccel, maxAccel,
+                maxSpecial, denseStates,
+                accelTablesArr, accelSingleEscapeArr,
+                needsDeadMatch ? remap[deadMatchIdx] : -1);
     }
 }

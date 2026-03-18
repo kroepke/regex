@@ -46,15 +46,15 @@ class DenseDFABuilderTest {
     }
 
     @Test
-    void matchStatesAreShuffledToEnd() {
+    void matchStatesAreInRange() {
         DenseDFA dfa = buildDense("[a-z]+");
         assertNotNull(dfa);
         int stride = dfa.stride();
-        // minMatchState must be above quit and below total state count * stride
-        assertTrue(dfa.minMatchState() > dfa.quit(),
-                "minMatchState (" + dfa.minMatchState() + ") should be > quit (" + dfa.quit() + ")");
-        assertTrue(dfa.minMatchState() < dfa.stateCount() * stride,
-                "minMatchState should be < stateCount * stride");
+        // minMatch must be above quit and below total state count * stride
+        assertTrue(dfa.minMatch() > dfa.quit(),
+                "minMatch (" + dfa.minMatch() + ") should be > quit (" + dfa.quit() + ")");
+        assertTrue(dfa.maxMatch() >= dfa.minMatch(),
+                "maxMatch (" + dfa.maxMatch() + ") should be >= minMatch (" + dfa.minMatch() + ")");
     }
 
     @Test
@@ -62,29 +62,30 @@ class DenseDFABuilderTest {
         DenseDFA dfa = buildDense("abc");
         assertNotNull(dfa);
         int stride = dfa.stride();
-        assertEquals(stride, dfa.dead(), "dead should be at stride");
-        assertEquals(stride * 2, dfa.quit(), "quit should be at stride * 2");
+        assertEquals(0, dfa.dead(), "dead should be at 0");
+        assertEquals(stride, dfa.quit(), "quit should be at stride");
     }
 
     @Test
     void allTransitionsArePopulated() {
-        // For a fully-built DenseDFA, real states (not dead/quit) should have
-        // no UNKNOWN (0) transitions in their class range. The padding state at
-        // index 0 is allowed to be all zeros.
+        // For a fully-built DenseDFA, all transition targets must be valid
+        // state IDs (multiples of stride within the table bounds).
+        // Dead is now at 0, so transitions to 0 are valid (they mean "dead").
         DenseDFA dfa = buildDense("[a-z]+");
         assertNotNull(dfa);
         int stride = dfa.stride();
-        int dead = dfa.dead();
-        int quit = dfa.quit();
         int[] table = dfa.transTable();
         int classCount = dfa.charClasses().classCount();
+        int maxSid = (dfa.stateCount() - 1) * stride;
 
-        for (int stateIdx = 3; stateIdx < dfa.stateCount(); stateIdx++) {
+        for (int stateIdx = 2; stateIdx < dfa.stateCount(); stateIdx++) {
             int sid = stateIdx * stride;
             for (int cls = 0; cls <= classCount; cls++) {
                 int target = table[sid + cls];
-                assertTrue(target != 0,
-                        "state " + sid + " class " + cls + " has UNKNOWN (0) transition");
+                assertTrue(target >= 0 && target <= maxSid,
+                        "state " + sid + " class " + cls + " has out-of-range target " + target);
+                assertEquals(0, target % stride,
+                        "state " + sid + " class " + cls + " target " + target + " not aligned to stride");
             }
         }
     }
@@ -98,7 +99,7 @@ class DenseDFABuilderTest {
         // Should have Start.COUNT * 2 start states
         assertEquals(lol.ohai.regex.automata.dfa.lazy.Start.COUNT * 2, starts.length);
         for (int i = 0; i < starts.length; i++) {
-            assertTrue(starts[i] > 0, "start state [" + i + "] should be > 0");
+            assertTrue(starts[i] >= 0, "start state [" + i + "] should be >= 0");
             assertEquals(0, starts[i] % stride,
                     "start state [" + i + "] should be a multiple of stride");
         }
