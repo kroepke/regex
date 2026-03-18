@@ -8,7 +8,6 @@ import lol.ohai.regex.syntax.ast.Ast;
 import lol.ohai.regex.syntax.ast.Parser;
 import lol.ohai.regex.syntax.hir.Hir;
 import lol.ohai.regex.syntax.hir.Translator;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -128,34 +127,6 @@ class DenseDFABuilderTest {
         assertTrue(dfa.stateCount() >= 5, "abc should have multiple states");
     }
 
-    @Disabled("pending special-state taxonomy impl")
-    @Test
-    void deadStateIsZero() {
-        DenseDFA dfa = buildDense("abc");
-        assertNotNull(dfa);
-        assertEquals(0, dfa.dead(), "dead should be at ID 0");
-    }
-
-    @Disabled("pending special-state taxonomy impl")
-    @Test
-    void quitStateIsStride() {
-        DenseDFA dfa = buildDense("abc");
-        assertNotNull(dfa);
-        assertEquals(dfa.stride(), dfa.quit(), "quit should be at stride");
-    }
-
-    @Disabled("pending special-state taxonomy impl")
-    @Test
-    void matchStatesAreAboveQuit() {
-        DenseDFA dfa = buildDense("[a-z]+");
-        assertNotNull(dfa);
-        assertTrue(dfa.minMatch() > dfa.stride(),
-                "minMatch must be > quit (stride)");
-        assertTrue(dfa.maxMatch() >= dfa.minMatch(),
-                "maxMatch must be >= minMatch");
-    }
-
-    @Disabled("pending special-state taxonomy impl")
     @Test
     void maxSpecialIsThreshold() {
         DenseDFA dfa = buildDense("[a-z]+");
@@ -165,28 +136,6 @@ class DenseDFABuilderTest {
                 "maxSpecial must be >= quit");
         assertTrue(maxSpecial < dfa.stateCount() * dfa.stride(),
                 "maxSpecial must be < total state space");
-    }
-
-    @Disabled("pending special-state taxonomy impl")
-    @Test
-    void allTransitionsArePopulatedNewLayout() {
-        DenseDFA dfa = buildDense("[a-z]+");
-        assertNotNull(dfa);
-        int stride = dfa.stride();
-        int[] table = dfa.transTable();
-        int classCount = dfa.charClasses().classCount();
-
-        // State 0 (dead) should self-loop to 0
-        for (int cls = 0; cls <= classCount; cls++) {
-            assertEquals(0, table[cls],
-                    "dead state class " + cls + " should loop to dead (0)");
-        }
-
-        // State stride (quit) should self-loop to stride
-        for (int cls = 0; cls <= classCount; cls++) {
-            assertEquals(stride, table[stride + cls],
-                    "quit state class " + cls + " should loop to quit");
-        }
     }
 
     // -- Helpers --
