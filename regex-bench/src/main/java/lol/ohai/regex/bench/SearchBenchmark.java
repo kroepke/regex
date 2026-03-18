@@ -13,12 +13,31 @@ import java.util.regex.Pattern;
  *
  * <p>Each benchmark finds all matches of a pattern in a haystack, consuming the
  * results via a {@link Blackhole} to prevent dead-code elimination.</p>
+ *
+ * <h3>Benchmark parameter design</h3>
+ *
+ * <p>Parameters are tiered by throughput to ensure adequate C2 warmup (≥10K
+ * invocations) before measurement begins. C2 needs ~10K method invocations
+ * to trigger compilation; under-warming measures C1/interpreter performance.</p>
+ *
+ * <ul>
+ *   <li><b>Fast</b> (>1000 ops/s): class defaults — 5s iterations, 5 warmup.
+ *       Benchmarks: literal, literalMiss, captures, unicodeWord, wordRepeat.</li>
+ *   <li><b>Medium</b> (200–1000 ops/s): 10s iterations, 5 warmup.
+ *       Benchmarks: multiline.</li>
+ *   <li><b>Slow</b> (<200 ops/s): 20s iterations, 10 warmup.
+ *       Benchmarks: charClass, alternation.</li>
+ * </ul>
+ *
+ * <p>3 forks is the minimum for capturing JIT compilation variance across
+ * JVM invocations. Use {@code -f 1 -wi 3 -i 3} for quick dev feedback only;
+ * never record single-fork numbers as stage results.</p>
  */
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
-@Warmup(iterations = 3, time = 2)
-@Measurement(iterations = 5, time = 2)
-@Fork(1)
+@Warmup(iterations = 5, time = 5)
+@Measurement(iterations = 5, time = 5)
+@Fork(3)
 @State(Scope.Thread)
 public class SearchBenchmark {
 
@@ -99,13 +118,18 @@ public class SearchBenchmark {
     }
 
     // ---- Character class: [a-zA-Z]+ ----
+    // Slow tier: ~100 ops/s → needs 20s × 10 warmup iterations = 200s = ~20K invocations
 
     @Benchmark
+    @Warmup(iterations = 10, time = 20)
+    @Measurement(iterations = 5, time = 20)
     public void charClassOhai(Blackhole bh) {
         ohaiCharClass.findAll(Haystacks.SHERLOCK_EN).forEach(bh::consume);
     }
 
     @Benchmark
+    @Warmup(iterations = 10, time = 20)
+    @Measurement(iterations = 5, time = 20)
     public void charClassJdk(Blackhole bh) {
         Matcher m = jdkCharClass.matcher(Haystacks.SHERLOCK_EN);
         while (m.find()) {
@@ -114,13 +138,18 @@ public class SearchBenchmark {
     }
 
     // ---- Alternation: Sherlock|Watson|Holmes|Irene ----
+    // Slow tier: ~50 ops/s → needs 20s × 10 warmup iterations = 200s = ~10K invocations
 
     @Benchmark
+    @Warmup(iterations = 10, time = 20)
+    @Measurement(iterations = 5, time = 20)
     public void alternationOhai(Blackhole bh) {
         ohaiAlternation.findAll(Haystacks.SHERLOCK_EN).forEach(bh::consume);
     }
 
     @Benchmark
+    @Warmup(iterations = 10, time = 20)
+    @Measurement(iterations = 5, time = 20)
     public void alternationJdk(Blackhole bh) {
         Matcher m = jdkAlternation.matcher(Haystacks.SHERLOCK_EN);
         while (m.find()) {
@@ -176,13 +205,18 @@ public class SearchBenchmark {
     }
 
     // ---- Loop unrolling stress: (?m)^.+$ (multiline look-around) ----
+    // Medium tier: ~350 ops/s → needs 10s × 5 warmup iterations = 50s = ~17K invocations
 
     @Benchmark
+    @Warmup(iterations = 5, time = 10)
+    @Measurement(iterations = 5, time = 10)
     public void multilineOhai(Blackhole bh) {
         ohaiMultiline.findAll(Haystacks.SHERLOCK_EN).forEach(bh::consume);
     }
 
     @Benchmark
+    @Warmup(iterations = 5, time = 10)
+    @Measurement(iterations = 5, time = 10)
     public void multilineJdk(Blackhole bh) {
         Matcher m = jdkMultiline.matcher(Haystacks.SHERLOCK_EN);
         while (m.find()) {

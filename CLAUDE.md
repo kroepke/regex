@@ -88,7 +88,12 @@ The project uses Maven with a wrapper script (`./mvnw`). Always use the wrapper 
 
 4. **Run the full test suite (2,154 tests) after every search-path change.** Not just the module you modified — the full reactor. Upstream TOML suite failures indicate behavioral divergence from Rust. Zero failures is the only acceptable result.
 
-5. **Run benchmarks after every search-path change.** Compare against the immediately preceding commit. Any benchmark that changes by more than 2x (in either direction) requires investigation and explanation before the change is committed. Use: `./mvnw -P bench package -DskipTests && java -jar regex-bench/target/benchmarks.jar -f 1 -wi 3 -i 5`
+5. **Run benchmarks after every search-path change.** Compare against the immediately preceding commit. Any benchmark that changes by more than 2x (in either direction) requires investigation and explanation before the change is committed.
+
+   **Benchmark parameters are tiered by throughput** to ensure adequate C2 warmup (≥10K invocations). The class defaults in `SearchBenchmark.java` encode the correct parameters — run without overrides for stage recording:
+   - **Stage recording (default):** `./mvnw -P bench package -DskipTests && java -jar regex-bench/target/benchmarks.jar` (~95 min, 3 forks, tiered warmup)
+   - **Quick dev feedback:** `java -jar regex-bench/target/benchmarks.jar -f 1 -wi 3 -i 3` (~5 min, indicative only)
+   - **Never record single-fork numbers as stage results.** Single-fork measurements do not capture JIT compilation variance and can be off by 10-30%.
 
 6. **When a subagent modifies `Strategy.java`, `Regex.java`, or any DFA/PikeVM interaction**, the review checkpoint MUST verify: (a) which upstream function this corresponds to, (b) that the search semantics match upstream, (c) that all tests pass, (d) that benchmarks show no regression.
 
