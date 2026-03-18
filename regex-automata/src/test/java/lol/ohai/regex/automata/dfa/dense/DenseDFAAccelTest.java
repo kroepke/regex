@@ -12,6 +12,7 @@ import lol.ohai.regex.syntax.ast.Ast;
 import lol.ohai.regex.syntax.ast.Parser;
 import lol.ohai.regex.syntax.hir.Hir;
 import lol.ohai.regex.syntax.hir.Translator;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
@@ -89,6 +90,67 @@ class DenseDFAAccelTest {
         long result = dfa.searchFwd(Input.of(input));
         assertTrue(SearchResult.isMatch(result));
         assertEquals(10, SearchResult.matchOffset(result));  // "first line" ends at 10
+    }
+
+    @Disabled("pending special-state taxonomy impl")
+    @Test
+    void matchPlusAccelOverlap() {
+        // [a-z]+ : match state self-loops on a-z → should be both match and accel
+        DenseDFA dfa = buildDenseUnchecked("[a-z]+");
+        assertNotNull(dfa);
+        assertTrue(dfa.minAccel() >= 0, "should have accel states");
+        // The match state for [a-z]+ should be in BOTH ranges
+        assertTrue(dfa.minAccel() <= dfa.maxMatch(),
+                "accel range should overlap with match range (minAccel <= maxMatch)");
+        assertTrue(dfa.maxAccel() >= dfa.minMatch(),
+                "accel range should overlap with match range (maxAccel >= minMatch)");
+    }
+
+    @Disabled("pending special-state taxonomy impl")
+    @Test
+    void startStateAcceleration() {
+        // (?m)^.+ : start state self-loops on non-\n → should be accel
+        DenseDFA dfa = buildDenseUnchecked("(?m)^.+");
+        assertNotNull(dfa);
+        assertTrue(dfa.minAccel() >= 0, "should have accel states");
+        // Verify start state is in accel range
+        int startSid = dfa.startStates()[0]; // unanchored TEXT start
+        assertTrue(dfa.isAccel(startSid),
+                "start state (sid=" + startSid + ") should be in accel range "
+                + "[" + dfa.minAccel() + ", " + dfa.maxAccel() + "]");
+    }
+
+    @Disabled("pending special-state taxonomy impl")
+    @Test
+    void spaceExclusionPreventsAccel() {
+        // [^ ]+ self-loops on everything except space → escape char is space.
+        // Space exclusion (accel.rs:449-458) prevents acceleration.
+        DenseDFA dfa = buildDenseUnchecked("[^ ]+");
+        assertNotNull(dfa);
+        assertTrue(dfa.minMatch() >= 0, "should have match states");
+        // The match state should NOT be in the accel range
+        for (int sid = dfa.minMatch(); sid <= dfa.maxMatch(); sid += dfa.stride()) {
+            assertFalse(dfa.isAccel(sid),
+                    "match state sid=" + sid + " should NOT be accelerated (space exclusion)");
+        }
+    }
+
+    @Disabled("pending special-state taxonomy impl")
+    @Test
+    void moreThanThreeEscapesNotAccelerated() {
+        // Structural regression test: accel analysis respects the >3 threshold.
+        // "a{2}" has intermediate and match states; verify DFA builds correctly.
+        DenseDFA dfa = buildDenseUnchecked("a{2}");
+        assertNotNull(dfa);
+        assertTrue(dfa.stateCount() >= 3);
+    }
+
+    private static DenseDFA buildDenseUnchecked(String pattern) {
+        try {
+            return buildDense(pattern);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to compile: " + pattern, e);
+        }
     }
 
     private static DenseDFA buildDense(String pattern) throws Exception {

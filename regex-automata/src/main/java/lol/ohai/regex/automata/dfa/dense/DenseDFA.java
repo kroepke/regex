@@ -109,6 +109,43 @@ public final class DenseDFA {
         return sid >= minMatchState;
     }
 
+    // -----------------------------------------------------------------------
+    // Stubs for the new special-state taxonomy layout (Task 2 implementation).
+    // These will be replaced by real implementations that reflect the new
+    // state layout: dead=0, quit=stride, match/accel at bottom.
+    // Ref: upstream special.rs:142-180, accel.rs:449-458
+    // -----------------------------------------------------------------------
+
+    /** New layout: minimum match state ID (bottom of match range). */
+    public int minMatch() {
+        throw new UnsupportedOperationException("pending special-state taxonomy impl");
+    }
+
+    /** New layout: maximum match state ID (top of match range). */
+    public int maxMatch() {
+        throw new UnsupportedOperationException("pending special-state taxonomy impl");
+    }
+
+    /** New layout: maximum special state ID (the threshold guard). */
+    public int maxSpecial() {
+        throw new UnsupportedOperationException("pending special-state taxonomy impl");
+    }
+
+    /** New layout: minimum accelerated state ID. */
+    public int minAccel() {
+        throw new UnsupportedOperationException("pending special-state taxonomy impl");
+    }
+
+    /** New layout: maximum accelerated state ID. */
+    public int maxAccel() {
+        throw new UnsupportedOperationException("pending special-state taxonomy impl");
+    }
+
+    /** New layout: returns true if the given state ID is in the accel range. */
+    public boolean isAccel(int sid) {
+        throw new UnsupportedOperationException("pending special-state taxonomy impl");
+    }
+
     /**
      * Forward search for the end position of the leftmost-first match.
      *
