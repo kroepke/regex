@@ -53,12 +53,31 @@ public final class DenseDFABuilder {
      * @return the dense DFA, or {@code null} if the pattern is unsupported
      *         or exceeds the state limit
      */
+    /**
+     * Maximum NFA state count for dense DFA construction. Patterns with more
+     * NFA states than this skip the dense DFA and use the lazy DFA instead.
+     * Matches upstream's heuristic at wrappers.rs:851-860 (default: 30).
+     *
+     * <p>Large NFA state counts produce large DFAs with many states, where the
+     * pre-compiled transition table offers little benefit over on-demand lazy
+     * DFA computation. The lazy DFA only materializes states actually reached
+     * during search, giving better cache behavior for patterns with many
+     * unreachable or rarely-reached states.</p>
+     */
+    private static final int DEFAULT_NFA_STATE_LIMIT = 30;
+
     public DenseDFA build(NFA nfa, CharClasses charClasses) {
         // Don't build dense DFA when char classes have quit chars (e.g., Unicode
         // word boundaries). Quit-char patterns can't handle all inputs in the DFA
         // and require frequent fallback to the lazy DFA, so the dense DFA provides
         // minimal benefit while risking edge-case correctness issues.
         if (charClasses.hasQuitClasses()) {
+            return null;
+        }
+
+        // Fast NFA state count check: skip dense DFA for complex patterns.
+        // Ref: upstream wrappers.rs:851-860 (dfa_state_limit, default 30)
+        if (nfa.stateCount() > DEFAULT_NFA_STATE_LIMIT) {
             return null;
         }
 
