@@ -1,0 +1,1037 @@
+--- Pass 1: slow benchmarks (charClass, alternation) ---
+# JMH version: 1.37
+# VM version: JDK 21.0.9, OpenJDK 64-Bit Server VM, 21.0.9+10-LTS
+# VM invoker: /home/kroepke/.sdkman/candidates/java/21.0.9-tem/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 10 iterations, 20 s each
+# Measurement: 5 iterations, 20 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Throughput, ops/time
+# Benchmark: lol.ohai.regex.bench.SearchBenchmark.alternationJdk
+
+# Run progress: 0.00% complete, ETA 01:00:00
+# Fork: 1 of 3
+# Warmup Iteration   1: 108.580 ops/s
+# Warmup Iteration   2: 108.158 ops/s
+# Warmup Iteration   3: 108.592 ops/s
+# Warmup Iteration   4: 108.608 ops/s
+# Warmup Iteration   5: 108.664 ops/s
+# Warmup Iteration   6: 108.092 ops/s
+# Warmup Iteration   7: 109.303 ops/s
+# Warmup Iteration   8: 106.316 ops/s
+# Warmup Iteration   9: 108.223 ops/s
+# Warmup Iteration  10: 107.726 ops/s
+Iteration   1: 106.280 ops/s
+Iteration   2: 103.057 ops/s
+Iteration   3: 106.251 ops/s
+Iteration   4: 106.109 ops/s
+Iteration   5: 104.935 ops/s
+
+# Run progress: 8.33% complete, ETA 00:55:08
+# Fork: 2 of 3
+# Warmup Iteration   1: 106.083 ops/s
+# Warmup Iteration   2: 105.248 ops/s
+# Warmup Iteration   3: 105.567 ops/s
+# Warmup Iteration   4: 105.215 ops/s
+# Warmup Iteration   5: 105.670 ops/s
+# Warmup Iteration   6: 105.475 ops/s
+# Warmup Iteration   7: 105.549 ops/s
+# Warmup Iteration   8: 105.363 ops/s
+# Warmup Iteration   9: 105.619 ops/s
+# Warmup Iteration  10: 105.722 ops/s
+Iteration   1: 105.637 ops/s
+Iteration   2: 105.680 ops/s
+Iteration   3: 105.710 ops/s
+Iteration   4: 105.484 ops/s
+Iteration   5: 105.678 ops/s
+
+# Run progress: 16.67% complete, ETA 00:50:07
+# Fork: 3 of 3
+# Warmup Iteration   1: 105.535 ops/s
+# Warmup Iteration   2: 105.690 ops/s
+# Warmup Iteration   3: 105.752 ops/s
+# Warmup Iteration   4: 105.880 ops/s
+# Warmup Iteration   5: 105.604 ops/s
+# Warmup Iteration   6: 105.791 ops/s
+# Warmup Iteration   7: 105.839 ops/s
+# Warmup Iteration   8: 105.618 ops/s
+# Warmup Iteration   9: 105.798 ops/s
+# Warmup Iteration  10: 105.625 ops/s
+Iteration   1: 105.595 ops/s
+Iteration   2: 105.741 ops/s
+Iteration   3: 105.578 ops/s
+Iteration   4: 105.827 ops/s
+Iteration   5: 105.681 ops/s
+
+
+Result "lol.ohai.regex.bench.SearchBenchmark.alternationJdk":
+  105.549 ±(99.9%) 0.815 ops/s [Average]
+  (min, avg, max) = (103.057, 105.549, 106.280), stdev = 0.762
+  CI (99.9%): [104.735, 106.364] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.9, OpenJDK 64-Bit Server VM, 21.0.9+10-LTS
+# VM invoker: /home/kroepke/.sdkman/candidates/java/21.0.9-tem/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 10 iterations, 20 s each
+# Measurement: 5 iterations, 20 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Throughput, ops/time
+# Benchmark: lol.ohai.regex.bench.SearchBenchmark.alternationOhai
+
+# Run progress: 25.00% complete, ETA 00:45:06
+# Fork: 1 of 3
+# Warmup Iteration   1: 46.169 ops/s
+# Warmup Iteration   2: 46.623 ops/s
+# Warmup Iteration   3: 46.449 ops/s
+# Warmup Iteration   4: 46.493 ops/s
+# Warmup Iteration   5: 46.458 ops/s
+# Warmup Iteration   6: 46.464 ops/s
+# Warmup Iteration   7: 46.520 ops/s
+# Warmup Iteration   8: 46.534 ops/s
+# Warmup Iteration   9: 46.509 ops/s
+# Warmup Iteration  10: 46.464 ops/s
+Iteration   1: 46.406 ops/s
+Iteration   2: 46.432 ops/s
+Iteration   3: 46.465 ops/s
+Iteration   4: 46.444 ops/s
+Iteration   5: 46.443 ops/s
+
+# Run progress: 33.33% complete, ETA 00:40:06
+# Fork: 2 of 3
+# Warmup Iteration   1: 45.742 ops/s
+# Warmup Iteration   2: 46.236 ops/s
+# Warmup Iteration   3: 46.275 ops/s
+# Warmup Iteration   4: 46.141 ops/s
+# Warmup Iteration   5: 46.126 ops/s
+# Warmup Iteration   6: 46.342 ops/s
+# Warmup Iteration   7: 46.286 ops/s
+# Warmup Iteration   8: 46.318 ops/s
+# Warmup Iteration   9: 46.258 ops/s
+# Warmup Iteration  10: 46.176 ops/s
+Iteration   1: 46.225 ops/s
+Iteration   2: 46.324 ops/s
+Iteration   3: 46.248 ops/s
+Iteration   4: 46.368 ops/s
+Iteration   5: 46.224 ops/s
+
+# Run progress: 41.67% complete, ETA 00:35:05
+# Fork: 3 of 3
+# Warmup Iteration   1: 45.911 ops/s
+# Warmup Iteration   2: 46.361 ops/s
+# Warmup Iteration   3: 46.374 ops/s
+# Warmup Iteration   4: 46.448 ops/s
+# Warmup Iteration   5: 46.364 ops/s
+# Warmup Iteration   6: 46.272 ops/s
+# Warmup Iteration   7: 46.398 ops/s
+# Warmup Iteration   8: 46.519 ops/s
+# Warmup Iteration   9: 46.481 ops/s
+# Warmup Iteration  10: 46.245 ops/s
+Iteration   1: 46.344 ops/s
+Iteration   2: 46.262 ops/s
+Iteration   3: 46.316 ops/s
+Iteration   4: 46.401 ops/s
+Iteration   5: 46.328 ops/s
+
+
+Result "lol.ohai.regex.bench.SearchBenchmark.alternationOhai":
+  46.349 ±(99.9%) 0.088 ops/s [Average]
+  (min, avg, max) = (46.224, 46.349, 46.465), stdev = 0.083
+  CI (99.9%): [46.260, 46.437] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.9, OpenJDK 64-Bit Server VM, 21.0.9+10-LTS
+# VM invoker: /home/kroepke/.sdkman/candidates/java/21.0.9-tem/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 10 iterations, 20 s each
+# Measurement: 5 iterations, 20 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Throughput, ops/time
+# Benchmark: lol.ohai.regex.bench.SearchBenchmark.charClassJdk
+
+# Run progress: 50.00% complete, ETA 00:30:04
+# Fork: 1 of 3
+# Warmup Iteration   1: 282.898 ops/s
+# Warmup Iteration   2: 283.726 ops/s
+# Warmup Iteration   3: 283.586 ops/s
+# Warmup Iteration   4: 283.132 ops/s
+# Warmup Iteration   5: 283.038 ops/s
+# Warmup Iteration   6: 283.353 ops/s
+# Warmup Iteration   7: 284.692 ops/s
+# Warmup Iteration   8: 284.621 ops/s
+# Warmup Iteration   9: 284.390 ops/s
+# Warmup Iteration  10: 284.913 ops/s
+Iteration   1: 284.476 ops/s
+Iteration   2: 284.163 ops/s
+Iteration   3: 285.069 ops/s
+Iteration   4: 284.809 ops/s
+Iteration   5: 284.681 ops/s
+
+# Run progress: 58.33% complete, ETA 00:25:03
+# Fork: 2 of 3
+# Warmup Iteration   1: 289.930 ops/s
+# Warmup Iteration   2: 290.496 ops/s
+# Warmup Iteration   3: 290.566 ops/s
+# Warmup Iteration   4: 290.943 ops/s
+# Warmup Iteration   5: 290.085 ops/s
+# Warmup Iteration   6: 289.991 ops/s
+# Warmup Iteration   7: 290.358 ops/s
+# Warmup Iteration   8: 290.128 ops/s
+# Warmup Iteration   9: 290.554 ops/s
+# Warmup Iteration  10: 290.273 ops/s
+Iteration   1: 290.743 ops/s
+Iteration   2: 290.550 ops/s
+Iteration   3: 290.318 ops/s
+Iteration   4: 290.102 ops/s
+Iteration   5: 290.066 ops/s
+
+# Run progress: 66.67% complete, ETA 00:20:02
+# Fork: 3 of 3
+# Warmup Iteration   1: 288.997 ops/s
+# Warmup Iteration   2: 290.859 ops/s
+# Warmup Iteration   3: 290.477 ops/s
+# Warmup Iteration   4: 289.900 ops/s
+# Warmup Iteration   5: 290.007 ops/s
+# Warmup Iteration   6: 290.267 ops/s
+# Warmup Iteration   7: 290.772 ops/s
+# Warmup Iteration   8: 290.801 ops/s
+# Warmup Iteration   9: 290.200 ops/s
+# Warmup Iteration  10: 290.485 ops/s
+Iteration   1: 290.248 ops/s
+Iteration   2: 290.808 ops/s
+Iteration   3: 290.283 ops/s
+Iteration   4: 290.863 ops/s
+Iteration   5: 290.509 ops/s
+
+
+Result "lol.ohai.regex.bench.SearchBenchmark.charClassJdk":
+  288.513 ±(99.9%) 3.047 ops/s [Average]
+  (min, avg, max) = (284.163, 288.513, 290.863), stdev = 2.850
+  CI (99.9%): [285.466, 291.559] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.9, OpenJDK 64-Bit Server VM, 21.0.9+10-LTS
+# VM invoker: /home/kroepke/.sdkman/candidates/java/21.0.9-tem/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 10 iterations, 20 s each
+# Measurement: 5 iterations, 20 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Throughput, ops/time
+# Benchmark: lol.ohai.regex.bench.SearchBenchmark.charClassOhai
+
+# Run progress: 75.00% complete, ETA 00:15:02
+# Fork: 1 of 3
+# Warmup Iteration   1: 99.153 ops/s
+# Warmup Iteration   2: 100.554 ops/s
+# Warmup Iteration   3: 100.201 ops/s
+# Warmup Iteration   4: 99.461 ops/s
+# Warmup Iteration   5: 99.649 ops/s
+# Warmup Iteration   6: 99.606 ops/s
+# Warmup Iteration   7: 99.487 ops/s
+# Warmup Iteration   8: 99.649 ops/s
+# Warmup Iteration   9: 99.580 ops/s
+# Warmup Iteration  10: 99.579 ops/s
+Iteration   1: 99.428 ops/s
+Iteration   2: 99.456 ops/s
+Iteration   3: 99.504 ops/s
+Iteration   4: 99.477 ops/s
+Iteration   5: 99.654 ops/s
+
+# Run progress: 83.33% complete, ETA 00:10:01
+# Fork: 2 of 3
+# Warmup Iteration   1: 98.212 ops/s
+# Warmup Iteration   2: 99.891 ops/s
+# Warmup Iteration   3: 100.223 ops/s
+# Warmup Iteration   4: 100.720 ops/s
+# Warmup Iteration   5: 100.755 ops/s
+# Warmup Iteration   6: 100.807 ops/s
+# Warmup Iteration   7: 100.907 ops/s
+# Warmup Iteration   8: 101.079 ops/s
+# Warmup Iteration   9: 100.785 ops/s
+# Warmup Iteration  10: 100.835 ops/s
+Iteration   1: 101.004 ops/s
+Iteration   2: 100.730 ops/s
+Iteration   3: 100.840 ops/s
+Iteration   4: 100.779 ops/s
+Iteration   5: 100.645 ops/s
+
+# Run progress: 91.67% complete, ETA 00:05:00
+# Fork: 3 of 3
+# Warmup Iteration   1: 99.467 ops/s
+# Warmup Iteration   2: 100.553 ops/s
+# Warmup Iteration   3: 100.788 ops/s
+# Warmup Iteration   4: 100.988 ops/s
+# Warmup Iteration   5: 100.764 ops/s
+# Warmup Iteration   6: 100.702 ops/s
+# Warmup Iteration   7: 101.055 ops/s
+# Warmup Iteration   8: 101.044 ops/s
+# Warmup Iteration   9: 100.668 ops/s
+# Warmup Iteration  10: 101.050 ops/s
+Iteration   1: 101.067 ops/s
+Iteration   2: 100.854 ops/s
+Iteration   3: 100.867 ops/s
+Iteration   4: 101.078 ops/s
+Iteration   5: 100.909 ops/s
+
+
+Result "lol.ohai.regex.bench.SearchBenchmark.charClassOhai":
+  100.419 ±(99.9%) 0.728 ops/s [Average]
+  (min, avg, max) = (99.428, 100.419, 101.078), stdev = 0.681
+  CI (99.9%): [99.691, 101.148] (assumes normal distribution)
+
+
+# Run complete. Total time: 01:00:08
+
+REMEMBER: The numbers below are just data. To gain reusable insights, you need to follow up on
+why the numbers are the way they are. Use profilers (see -prof, -lprof), design factorial
+experiments, perform baseline and negative tests that provide experimental control, make sure
+the benchmarking environment is safe on JVM/OS/HW level, ask for reviews from the domain experts.
+Do not assume the numbers tell you what you want them to tell.
+
+NOTE: Current JVM experimentally supports Compiler Blackholes, and they are in use. Please exercise
+extra caution when trusting the results, look into the generated code to check the benchmark still
+works, and factor in a small probability of new VM bugs. Additionally, while comparisons between
+different JVMs are already problematic, the performance difference caused by different Blackhole
+modes can be very significant. Please make sure you use the consistent Blackhole mode for comparisons.
+
+Benchmark                         Mode  Cnt    Score   Error  Units
+SearchBenchmark.alternationJdk   thrpt   15  105.549 ± 0.815  ops/s
+SearchBenchmark.alternationOhai  thrpt   15   46.349 ± 0.088  ops/s
+SearchBenchmark.charClassJdk     thrpt   15  288.513 ± 3.047  ops/s
+SearchBenchmark.charClassOhai    thrpt   15  100.419 ± 0.728  ops/s
+
+--- Pass 2: fast/medium benchmarks ---
+# JMH version: 1.37
+# VM version: JDK 21.0.9, OpenJDK 64-Bit Server VM, 21.0.9+10-LTS
+# VM invoker: /home/kroepke/.sdkman/candidates/java/21.0.9-tem/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 5 s each
+# Measurement: 5 iterations, 5 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Throughput, ops/time
+# Benchmark: lol.ohai.regex.bench.SearchBenchmark.capturesJdk
+
+# Run progress: 0.00% complete, ETA 00:30:00
+# Fork: 1 of 3
+# Warmup Iteration   1: 15814.796 ops/s
+# Warmup Iteration   2: 15925.046 ops/s
+# Warmup Iteration   3: 15823.553 ops/s
+# Warmup Iteration   4: 15838.618 ops/s
+# Warmup Iteration   5: 15825.047 ops/s
+Iteration   1: 15766.949 ops/s
+Iteration   2: 15763.494 ops/s
+Iteration   3: 15822.965 ops/s
+Iteration   4: 15863.601 ops/s
+Iteration   5: 15789.092 ops/s
+
+# Run progress: 2.78% complete, ETA 00:29:34
+# Fork: 2 of 3
+# Warmup Iteration   1: 18922.961 ops/s
+# Warmup Iteration   2: 18953.987 ops/s
+# Warmup Iteration   3: 19058.402 ops/s
+# Warmup Iteration   4: 19152.249 ops/s
+# Warmup Iteration   5: 19111.362 ops/s
+Iteration   1: 19037.005 ops/s
+Iteration   2: 19047.179 ops/s
+Iteration   3: 19103.676 ops/s
+Iteration   4: 19151.115 ops/s
+Iteration   5: 19070.170 ops/s
+
+# Run progress: 5.56% complete, ETA 00:28:43
+# Fork: 3 of 3
+# Warmup Iteration   1: 18954.271 ops/s
+# Warmup Iteration   2: 18935.014 ops/s
+# Warmup Iteration   3: 19001.407 ops/s
+# Warmup Iteration   4: 19153.173 ops/s
+# Warmup Iteration   5: 19167.769 ops/s
+Iteration   1: 19027.706 ops/s
+Iteration   2: 19146.904 ops/s
+Iteration   3: 19000.662 ops/s
+Iteration   4: 19046.229 ops/s
+Iteration   5: 18922.292 ops/s
+
+
+Result "lol.ohai.regex.bench.SearchBenchmark.capturesJdk":
+  17970.603 ±(99.9%) 1698.663 ops/s [Average]
+  (min, avg, max) = (15763.494, 17970.603, 19151.115), stdev = 1588.931
+  CI (99.9%): [16271.939, 19669.266] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.9, OpenJDK 64-Bit Server VM, 21.0.9+10-LTS
+# VM invoker: /home/kroepke/.sdkman/candidates/java/21.0.9-tem/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 5 s each
+# Measurement: 5 iterations, 5 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Throughput, ops/time
+# Benchmark: lol.ohai.regex.bench.SearchBenchmark.capturesOhai
+
+# Run progress: 8.33% complete, ETA 00:27:52
+# Fork: 1 of 3
+# Warmup Iteration   1: 19087.574 ops/s
+# Warmup Iteration   2: 21176.741 ops/s
+# Warmup Iteration   3: 21369.379 ops/s
+# Warmup Iteration   4: 21348.293 ops/s
+# Warmup Iteration   5: 21424.966 ops/s
+Iteration   1: 21427.519 ops/s
+Iteration   2: 21362.352 ops/s
+Iteration   3: 21427.289 ops/s
+Iteration   4: 21335.564 ops/s
+Iteration   5: 21374.737 ops/s
+
+# Run progress: 11.11% complete, ETA 00:27:02
+# Fork: 2 of 3
+# Warmup Iteration   1: 19448.007 ops/s
+# Warmup Iteration   2: 21322.129 ops/s
+# Warmup Iteration   3: 21286.072 ops/s
+# Warmup Iteration   4: 21355.760 ops/s
+# Warmup Iteration   5: 21365.501 ops/s
+Iteration   1: 21350.661 ops/s
+Iteration   2: 21330.059 ops/s
+Iteration   3: 21333.661 ops/s
+Iteration   4: 21312.016 ops/s
+Iteration   5: 21348.820 ops/s
+
+# Run progress: 13.89% complete, ETA 00:26:11
+# Fork: 3 of 3
+# Warmup Iteration   1: 19258.312 ops/s
+# Warmup Iteration   2: 21262.564 ops/s
+# Warmup Iteration   3: 21403.315 ops/s
+# Warmup Iteration   4: 21341.964 ops/s
+# Warmup Iteration   5: 21326.626 ops/s
+Iteration   1: 21382.700 ops/s
+Iteration   2: 21414.125 ops/s
+Iteration   3: 21309.894 ops/s
+Iteration   4: 21314.633 ops/s
+Iteration   5: 21250.598 ops/s
+
+
+Result "lol.ohai.regex.bench.SearchBenchmark.capturesOhai":
+  21351.642 ±(99.9%) 51.861 ops/s [Average]
+  (min, avg, max) = (21250.598, 21351.642, 21427.519), stdev = 48.510
+  CI (99.9%): [21299.781, 21403.503] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.9, OpenJDK 64-Bit Server VM, 21.0.9+10-LTS
+# VM invoker: /home/kroepke/.sdkman/candidates/java/21.0.9-tem/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 5 s each
+# Measurement: 5 iterations, 5 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Throughput, ops/time
+# Benchmark: lol.ohai.regex.bench.SearchBenchmark.literalJdk
+
+# Run progress: 16.67% complete, ETA 00:25:20
+# Fork: 1 of 3
+# Warmup Iteration   1: 3164.694 ops/s
+# Warmup Iteration   2: 3195.497 ops/s
+# Warmup Iteration   3: 3207.967 ops/s
+# Warmup Iteration   4: 3197.767 ops/s
+# Warmup Iteration   5: 3193.232 ops/s
+Iteration   1: 3197.655 ops/s
+Iteration   2: 3200.360 ops/s
+Iteration   3: 3313.276 ops/s
+Iteration   4: 3319.177 ops/s
+Iteration   5: 3309.460 ops/s
+
+# Run progress: 19.44% complete, ETA 00:24:29
+# Fork: 2 of 3
+# Warmup Iteration   1: 3250.258 ops/s
+# Warmup Iteration   2: 3277.182 ops/s
+# Warmup Iteration   3: 3269.330 ops/s
+# Warmup Iteration   4: 3282.606 ops/s
+# Warmup Iteration   5: 3273.276 ops/s
+Iteration   1: 3270.242 ops/s
+Iteration   2: 3287.387 ops/s
+Iteration   3: 3306.816 ops/s
+Iteration   4: 3313.227 ops/s
+Iteration   5: 3301.156 ops/s
+
+# Run progress: 22.22% complete, ETA 00:23:38
+# Fork: 3 of 3
+# Warmup Iteration   1: 3249.294 ops/s
+# Warmup Iteration   2: 3260.539 ops/s
+# Warmup Iteration   3: 3266.097 ops/s
+# Warmup Iteration   4: 3267.105 ops/s
+# Warmup Iteration   5: 3272.811 ops/s
+Iteration   1: 3266.077 ops/s
+Iteration   2: 3284.354 ops/s
+Iteration   3: 3303.934 ops/s
+Iteration   4: 3299.497 ops/s
+Iteration   5: 3301.798 ops/s
+
+
+Result "lol.ohai.regex.bench.SearchBenchmark.literalJdk":
+  3284.961 ±(99.9%) 40.734 ops/s [Average]
+  (min, avg, max) = (3197.655, 3284.961, 3319.177), stdev = 38.103
+  CI (99.9%): [3244.227, 3325.695] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.9, OpenJDK 64-Bit Server VM, 21.0.9+10-LTS
+# VM invoker: /home/kroepke/.sdkman/candidates/java/21.0.9-tem/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 5 s each
+# Measurement: 5 iterations, 5 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Throughput, ops/time
+# Benchmark: lol.ohai.regex.bench.SearchBenchmark.literalMissJdk
+
+# Run progress: 25.00% complete, ETA 00:22:48
+# Fork: 1 of 3
+# Warmup Iteration   1: 2245.209 ops/s
+# Warmup Iteration   2: 2552.103 ops/s
+# Warmup Iteration   3: 2556.219 ops/s
+# Warmup Iteration   4: 2554.509 ops/s
+# Warmup Iteration   5: 2513.136 ops/s
+Iteration   1: 2521.806 ops/s
+Iteration   2: 2544.807 ops/s
+Iteration   3: 2539.560 ops/s
+Iteration   4: 2491.599 ops/s
+Iteration   5: 2188.559 ops/s
+
+# Run progress: 27.78% complete, ETA 00:21:57
+# Fork: 2 of 3
+# Warmup Iteration   1: 2244.866 ops/s
+# Warmup Iteration   2: 2555.254 ops/s
+# Warmup Iteration   3: 2554.019 ops/s
+# Warmup Iteration   4: 2550.498 ops/s
+# Warmup Iteration   5: 2508.300 ops/s
+Iteration   1: 2521.927 ops/s
+Iteration   2: 2546.898 ops/s
+Iteration   3: 2546.589 ops/s
+Iteration   4: 2486.377 ops/s
+Iteration   5: 2199.667 ops/s
+
+# Run progress: 30.56% complete, ETA 00:21:06
+# Fork: 3 of 3
+# Warmup Iteration   1: 2240.103 ops/s
+# Warmup Iteration   2: 2557.521 ops/s
+# Warmup Iteration   3: 2553.843 ops/s
+# Warmup Iteration   4: 2552.677 ops/s
+# Warmup Iteration   5: 2508.998 ops/s
+Iteration   1: 2519.539 ops/s
+Iteration   2: 2549.965 ops/s
+Iteration   3: 2547.715 ops/s
+Iteration   4: 2484.408 ops/s
+Iteration   5: 2171.255 ops/s
+
+
+Result "lol.ohai.regex.bench.SearchBenchmark.literalMissJdk":
+  2457.378 ±(99.9%) 151.881 ops/s [Average]
+  (min, avg, max) = (2171.255, 2457.378, 2549.965), stdev = 142.069
+  CI (99.9%): [2305.497, 2609.259] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.9, OpenJDK 64-Bit Server VM, 21.0.9+10-LTS
+# VM invoker: /home/kroepke/.sdkman/candidates/java/21.0.9-tem/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 5 s each
+# Measurement: 5 iterations, 5 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Throughput, ops/time
+# Benchmark: lol.ohai.regex.bench.SearchBenchmark.literalMissOhai
+
+# Run progress: 33.33% complete, ETA 00:20:15
+# Fork: 1 of 3
+# Warmup Iteration   1: 3918.097 ops/s
+# Warmup Iteration   2: 5205.897 ops/s
+# Warmup Iteration   3: 5210.619 ops/s
+# Warmup Iteration   4: 5192.184 ops/s
+# Warmup Iteration   5: 5189.475 ops/s
+Iteration   1: 5205.983 ops/s
+Iteration   2: 5212.373 ops/s
+Iteration   3: 5045.347 ops/s
+Iteration   4: 5245.863 ops/s
+Iteration   5: 5240.636 ops/s
+
+# Run progress: 36.11% complete, ETA 00:19:25
+# Fork: 2 of 3
+# Warmup Iteration   1: 4336.357 ops/s
+# Warmup Iteration   2: 5148.390 ops/s
+# Warmup Iteration   3: 5199.239 ops/s
+# Warmup Iteration   4: 5153.340 ops/s
+# Warmup Iteration   5: 5165.159 ops/s
+Iteration   1: 4841.487 ops/s
+Iteration   2: 5187.889 ops/s
+Iteration   3: 5188.334 ops/s
+Iteration   4: 5164.490 ops/s
+Iteration   5: 5184.828 ops/s
+
+# Run progress: 38.89% complete, ETA 00:18:34
+# Fork: 3 of 3
+# Warmup Iteration   1: 4003.547 ops/s
+# Warmup Iteration   2: 5197.890 ops/s
+# Warmup Iteration   3: 5197.540 ops/s
+# Warmup Iteration   4: 5168.629 ops/s
+# Warmup Iteration   5: 5193.269 ops/s
+Iteration   1: 5207.944 ops/s
+Iteration   2: 5214.473 ops/s
+Iteration   3: 5212.663 ops/s
+Iteration   4: 5188.429 ops/s
+Iteration   5: 5203.981 ops/s
+
+
+Result "lol.ohai.regex.bench.SearchBenchmark.literalMissOhai":
+  5169.648 ±(99.9%) 108.772 ops/s [Average]
+  (min, avg, max) = (4841.487, 5169.648, 5245.863), stdev = 101.746
+  CI (99.9%): [5060.876, 5278.420] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.9, OpenJDK 64-Bit Server VM, 21.0.9+10-LTS
+# VM invoker: /home/kroepke/.sdkman/candidates/java/21.0.9-tem/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 5 s each
+# Measurement: 5 iterations, 5 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Throughput, ops/time
+# Benchmark: lol.ohai.regex.bench.SearchBenchmark.literalOhai
+
+# Run progress: 41.67% complete, ETA 00:17:44
+# Fork: 1 of 3
+# Warmup Iteration   1: 4016.819 ops/s
+# Warmup Iteration   2: 4895.593 ops/s
+# Warmup Iteration   3: 4900.096 ops/s
+# Warmup Iteration   4: 4558.924 ops/s
+# Warmup Iteration   5: 4872.479 ops/s
+Iteration   1: 4897.547 ops/s
+Iteration   2: 4919.942 ops/s
+Iteration   3: 4902.785 ops/s
+Iteration   4: 4897.645 ops/s
+Iteration   5: 4886.840 ops/s
+
+# Run progress: 44.44% complete, ETA 00:16:53
+# Fork: 2 of 3
+# Warmup Iteration   1: 4064.106 ops/s
+# Warmup Iteration   2: 4859.376 ops/s
+# Warmup Iteration   3: 4854.002 ops/s
+# Warmup Iteration   4: 4786.155 ops/s
+# Warmup Iteration   5: 4644.456 ops/s
+Iteration   1: 4872.483 ops/s
+Iteration   2: 4873.865 ops/s
+Iteration   3: 4868.081 ops/s
+Iteration   4: 4847.306 ops/s
+Iteration   5: 4876.801 ops/s
+
+# Run progress: 47.22% complete, ETA 00:16:02
+# Fork: 3 of 3
+# Warmup Iteration   1: 4070.639 ops/s
+# Warmup Iteration   2: 4840.236 ops/s
+# Warmup Iteration   3: 4844.164 ops/s
+# Warmup Iteration   4: 4852.124 ops/s
+# Warmup Iteration   5: 4853.737 ops/s
+Iteration   1: 4873.992 ops/s
+Iteration   2: 4887.806 ops/s
+Iteration   3: 4858.092 ops/s
+Iteration   4: 4724.907 ops/s
+Iteration   5: 4864.373 ops/s
+
+
+Result "lol.ohai.regex.bench.SearchBenchmark.literalOhai":
+  4870.164 ±(99.9%) 47.398 ops/s [Average]
+  (min, avg, max) = (4724.907, 4870.164, 4919.942), stdev = 44.336
+  CI (99.9%): [4822.766, 4917.562] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.9, OpenJDK 64-Bit Server VM, 21.0.9+10-LTS
+# VM invoker: /home/kroepke/.sdkman/candidates/java/21.0.9-tem/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 5 s each
+# Measurement: 5 iterations, 5 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Throughput, ops/time
+# Benchmark: lol.ohai.regex.bench.SearchBenchmark.multilineJdk
+
+# Run progress: 50.00% complete, ETA 00:15:12
+# Fork: 1 of 3
+# Warmup Iteration   1: 1030.753 ops/s
+# Warmup Iteration   2: 1034.809 ops/s
+# Warmup Iteration   3: 1038.558 ops/s
+# Warmup Iteration   4: 1034.959 ops/s
+# Warmup Iteration   5: 1028.947 ops/s
+Iteration   1: 1039.166 ops/s
+Iteration   2: 1037.549 ops/s
+Iteration   3: 1040.831 ops/s
+Iteration   4: 1041.252 ops/s
+Iteration   5: 1040.243 ops/s
+
+# Run progress: 52.78% complete, ETA 00:14:21
+# Fork: 2 of 3
+# Warmup Iteration   1: 1023.138 ops/s
+# Warmup Iteration   2: 1015.443 ops/s
+# Warmup Iteration   3: 1014.617 ops/s
+# Warmup Iteration   4: 1024.632 ops/s
+# Warmup Iteration   5: 1026.856 ops/s
+Iteration   1: 1027.403 ops/s
+Iteration   2: 1025.980 ops/s
+Iteration   3: 1031.552 ops/s
+Iteration   4: 1029.490 ops/s
+Iteration   5: 1029.305 ops/s
+
+# Run progress: 55.56% complete, ETA 00:13:30
+# Fork: 3 of 3
+# Warmup Iteration   1: 1016.047 ops/s
+# Warmup Iteration   2: 1020.778 ops/s
+# Warmup Iteration   3: 1021.549 ops/s
+# Warmup Iteration   4: 1021.467 ops/s
+# Warmup Iteration   5: 1020.705 ops/s
+Iteration   1: 1021.543 ops/s
+Iteration   2: 1020.092 ops/s
+Iteration   3: 1021.600 ops/s
+Iteration   4: 1023.334 ops/s
+Iteration   5: 1020.941 ops/s
+
+
+Result "lol.ohai.regex.bench.SearchBenchmark.multilineJdk":
+  1030.019 ±(99.9%) 8.488 ops/s [Average]
+  (min, avg, max) = (1020.092, 1030.019, 1041.252), stdev = 7.940
+  CI (99.9%): [1021.530, 1038.507] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.9, OpenJDK 64-Bit Server VM, 21.0.9+10-LTS
+# VM invoker: /home/kroepke/.sdkman/candidates/java/21.0.9-tem/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 5 s each
+# Measurement: 5 iterations, 5 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Throughput, ops/time
+# Benchmark: lol.ohai.regex.bench.SearchBenchmark.multilineOhai
+
+# Run progress: 58.33% complete, ETA 00:12:40
+# Fork: 1 of 3
+# Warmup Iteration   1: 218.619 ops/s
+# Warmup Iteration   2: 228.043 ops/s
+# Warmup Iteration   3: 227.953 ops/s
+# Warmup Iteration   4: 228.460 ops/s
+# Warmup Iteration   5: 229.078 ops/s
+Iteration   1: 229.064 ops/s
+Iteration   2: 229.088 ops/s
+Iteration   3: 228.888 ops/s
+Iteration   4: 229.375 ops/s
+Iteration   5: 229.065 ops/s
+
+# Run progress: 61.11% complete, ETA 00:11:49
+# Fork: 2 of 3
+# Warmup Iteration   1: 219.347 ops/s
+# Warmup Iteration   2: 226.632 ops/s
+# Warmup Iteration   3: 226.606 ops/s
+# Warmup Iteration   4: 227.166 ops/s
+# Warmup Iteration   5: 227.742 ops/s
+Iteration   1: 228.783 ops/s
+Iteration   2: 228.494 ops/s
+Iteration   3: 228.371 ops/s
+Iteration   4: 228.447 ops/s
+Iteration   5: 228.830 ops/s
+
+# Run progress: 63.89% complete, ETA 00:10:58
+# Fork: 3 of 3
+# Warmup Iteration   1: 220.302 ops/s
+# Warmup Iteration   2: 228.377 ops/s
+# Warmup Iteration   3: 228.723 ops/s
+# Warmup Iteration   4: 228.127 ops/s
+# Warmup Iteration   5: 228.935 ops/s
+Iteration   1: 229.689 ops/s
+Iteration   2: 229.313 ops/s
+Iteration   3: 229.028 ops/s
+Iteration   4: 229.470 ops/s
+Iteration   5: 229.339 ops/s
+
+
+Result "lol.ohai.regex.bench.SearchBenchmark.multilineOhai":
+  229.016 ±(99.9%) 0.415 ops/s [Average]
+  (min, avg, max) = (228.371, 229.016, 229.689), stdev = 0.388
+  CI (99.9%): [228.601, 229.431] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.9, OpenJDK 64-Bit Server VM, 21.0.9+10-LTS
+# VM invoker: /home/kroepke/.sdkman/candidates/java/21.0.9-tem/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 5 s each
+# Measurement: 5 iterations, 5 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Throughput, ops/time
+# Benchmark: lol.ohai.regex.bench.SearchBenchmark.unicodeWordJdk
+
+# Run progress: 66.67% complete, ETA 00:10:08
+# Fork: 1 of 3
+# Warmup Iteration   1: 31880.414 ops/s
+# Warmup Iteration   2: 32299.641 ops/s
+# Warmup Iteration   3: 32546.560 ops/s
+# Warmup Iteration   4: 32627.464 ops/s
+# Warmup Iteration   5: 32641.052 ops/s
+Iteration   1: 32552.903 ops/s
+Iteration   2: 32607.229 ops/s
+Iteration   3: 32503.123 ops/s
+Iteration   4: 32404.168 ops/s
+Iteration   5: 32401.601 ops/s
+
+# Run progress: 69.44% complete, ETA 00:09:17
+# Fork: 2 of 3
+# Warmup Iteration   1: 38812.687 ops/s
+# Warmup Iteration   2: 39437.915 ops/s
+# Warmup Iteration   3: 39484.347 ops/s
+# Warmup Iteration   4: 39475.844 ops/s
+# Warmup Iteration   5: 39269.774 ops/s
+Iteration   1: 39248.100 ops/s
+Iteration   2: 39143.186 ops/s
+Iteration   3: 39300.102 ops/s
+Iteration   4: 39248.082 ops/s
+Iteration   5: 39304.713 ops/s
+
+# Run progress: 72.22% complete, ETA 00:08:26
+# Fork: 3 of 3
+# Warmup Iteration   1: 37782.075 ops/s
+# Warmup Iteration   2: 38279.006 ops/s
+# Warmup Iteration   3: 38442.494 ops/s
+# Warmup Iteration   4: 38705.122 ops/s
+# Warmup Iteration   5: 38393.651 ops/s
+Iteration   1: 38367.356 ops/s
+Iteration   2: 38384.053 ops/s
+Iteration   3: 38589.371 ops/s
+Iteration   4: 38329.176 ops/s
+Iteration   5: 38273.507 ops/s
+
+
+Result "lol.ohai.regex.bench.SearchBenchmark.unicodeWordJdk":
+  36710.445 ±(99.9%) 3323.527 ops/s [Average]
+  (min, avg, max) = (32401.601, 36710.445, 39304.713), stdev = 3108.829
+  CI (99.9%): [33386.918, 40033.972] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.9, OpenJDK 64-Bit Server VM, 21.0.9+10-LTS
+# VM invoker: /home/kroepke/.sdkman/candidates/java/21.0.9-tem/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 5 s each
+# Measurement: 5 iterations, 5 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Throughput, ops/time
+# Benchmark: lol.ohai.regex.bench.SearchBenchmark.unicodeWordOhai
+
+# Run progress: 75.00% complete, ETA 00:07:35
+# Fork: 1 of 3
+# Warmup Iteration   1: 18041.405 ops/s
+# Warmup Iteration   2: 18980.199 ops/s
+# Warmup Iteration   3: 19048.578 ops/s
+# Warmup Iteration   4: 19119.994 ops/s
+# Warmup Iteration   5: 18999.849 ops/s
+Iteration   1: 19016.730 ops/s
+Iteration   2: 19073.514 ops/s
+Iteration   3: 19014.530 ops/s
+Iteration   4: 19058.892 ops/s
+Iteration   5: 19027.092 ops/s
+
+# Run progress: 77.78% complete, ETA 00:06:45
+# Fork: 2 of 3
+# Warmup Iteration   1: 17550.907 ops/s
+# Warmup Iteration   2: 19039.498 ops/s
+# Warmup Iteration   3: 19083.734 ops/s
+# Warmup Iteration   4: 19026.646 ops/s
+# Warmup Iteration   5: 19191.883 ops/s
+Iteration   1: 19078.748 ops/s
+Iteration   2: 19098.406 ops/s
+Iteration   3: 19042.404 ops/s
+Iteration   4: 19109.535 ops/s
+Iteration   5: 19177.042 ops/s
+
+# Run progress: 80.56% complete, ETA 00:05:54
+# Fork: 3 of 3
+# Warmup Iteration   1: 18074.498 ops/s
+# Warmup Iteration   2: 18385.826 ops/s
+# Warmup Iteration   3: 18207.519 ops/s
+# Warmup Iteration   4: 18241.767 ops/s
+# Warmup Iteration   5: 18189.145 ops/s
+Iteration   1: 18297.530 ops/s
+Iteration   2: 18120.126 ops/s
+Iteration   3: 18235.748 ops/s
+Iteration   4: 18289.485 ops/s
+Iteration   5: 18314.433 ops/s
+
+
+Result "lol.ohai.regex.bench.SearchBenchmark.unicodeWordOhai":
+  18796.948 ±(99.9%) 431.352 ops/s [Average]
+  (min, avg, max) = (18120.126, 18796.948, 19177.042), stdev = 403.487
+  CI (99.9%): [18365.595, 19228.300] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.9, OpenJDK 64-Bit Server VM, 21.0.9+10-LTS
+# VM invoker: /home/kroepke/.sdkman/candidates/java/21.0.9-tem/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 5 s each
+# Measurement: 5 iterations, 5 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Throughput, ops/time
+# Benchmark: lol.ohai.regex.bench.SearchBenchmark.wordRepeatJdk
+
+# Run progress: 83.33% complete, ETA 00:05:03
+# Fork: 1 of 3
+# Warmup Iteration   1: 11321.389 ops/s
+# Warmup Iteration   2: 11268.714 ops/s
+# Warmup Iteration   3: 11289.067 ops/s
+# Warmup Iteration   4: 11430.203 ops/s
+# Warmup Iteration   5: 11301.734 ops/s
+Iteration   1: 11381.242 ops/s
+Iteration   2: 11419.671 ops/s
+Iteration   3: 11374.537 ops/s
+Iteration   4: 11415.830 ops/s
+Iteration   5: 11376.817 ops/s
+
+# Run progress: 86.11% complete, ETA 00:04:13
+# Fork: 2 of 3
+# Warmup Iteration   1: 11280.229 ops/s
+# Warmup Iteration   2: 11253.762 ops/s
+# Warmup Iteration   3: 11252.881 ops/s
+# Warmup Iteration   4: 11481.458 ops/s
+# Warmup Iteration   5: 11278.584 ops/s
+Iteration   1: 11308.795 ops/s
+Iteration   2: 11353.805 ops/s
+Iteration   3: 11302.645 ops/s
+Iteration   4: 11335.875 ops/s
+Iteration   5: 11337.311 ops/s
+
+# Run progress: 88.89% complete, ETA 00:03:22
+# Fork: 3 of 3
+# Warmup Iteration   1: 11258.753 ops/s
+# Warmup Iteration   2: 11243.458 ops/s
+# Warmup Iteration   3: 11250.357 ops/s
+# Warmup Iteration   4: 11402.251 ops/s
+# Warmup Iteration   5: 11283.393 ops/s
+Iteration   1: 11269.353 ops/s
+Iteration   2: 11330.357 ops/s
+Iteration   3: 11339.279 ops/s
+Iteration   4: 11303.420 ops/s
+Iteration   5: 11271.422 ops/s
+
+
+Result "lol.ohai.regex.bench.SearchBenchmark.wordRepeatJdk":
+  11341.357 ±(99.9%) 49.512 ops/s [Average]
+  (min, avg, max) = (11269.353, 11341.357, 11419.671), stdev = 46.313
+  CI (99.9%): [11291.846, 11390.869] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 21.0.9, OpenJDK 64-Bit Server VM, 21.0.9+10-LTS
+# VM invoker: /home/kroepke/.sdkman/candidates/java/21.0.9-tem/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 5 s each
+# Measurement: 5 iterations, 5 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Throughput, ops/time
+# Benchmark: lol.ohai.regex.bench.SearchBenchmark.wordRepeatOhai
+
+# Run progress: 91.67% complete, ETA 00:02:31
+# Fork: 1 of 3
+# Warmup Iteration   1: 86761.271 ops/s
+# Warmup Iteration   2: 91862.440 ops/s
+# Warmup Iteration   3: 91769.569 ops/s
+# Warmup Iteration   4: 91888.746 ops/s
+# Warmup Iteration   5: 91703.538 ops/s
+Iteration   1: 91881.490 ops/s
+Iteration   2: 91723.767 ops/s
+Iteration   3: 91917.805 ops/s
+Iteration   4: 91888.715 ops/s
+Iteration   5: 91911.103 ops/s
+
+# Run progress: 94.44% complete, ETA 00:01:41
+# Fork: 2 of 3
+# Warmup Iteration   1: 88175.515 ops/s
+# Warmup Iteration   2: 91326.473 ops/s
+# Warmup Iteration   3: 91027.258 ops/s
+# Warmup Iteration   4: 91366.114 ops/s
+# Warmup Iteration   5: 91301.984 ops/s
+Iteration   1: 91164.222 ops/s
+Iteration   2: 91217.403 ops/s
+Iteration   3: 91284.098 ops/s
+Iteration   4: 91199.067 ops/s
+Iteration   5: 91301.367 ops/s
+
+# Run progress: 97.22% complete, ETA 00:00:50
+# Fork: 3 of 3
+# Warmup Iteration   1: 87940.768 ops/s
+# Warmup Iteration   2: 91222.075 ops/s
+# Warmup Iteration   3: 91203.068 ops/s
+# Warmup Iteration   4: 90937.507 ops/s
+# Warmup Iteration   5: 91244.018 ops/s
+Iteration   1: 91087.486 ops/s
+Iteration   2: 91142.184 ops/s
+Iteration   3: 91189.341 ops/s
+Iteration   4: 91073.774 ops/s
+Iteration   5: 91236.376 ops/s
+
+
+Result "lol.ohai.regex.bench.SearchBenchmark.wordRepeatOhai":
+  91414.547 ±(99.9%) 360.940 ops/s [Average]
+  (min, avg, max) = (91073.774, 91414.547, 91917.805), stdev = 337.623
+  CI (99.9%): [91053.607, 91775.486] (assumes normal distribution)
+
+
+# Run complete. Total time: 00:30:23
+
+REMEMBER: The numbers below are just data. To gain reusable insights, you need to follow up on
+why the numbers are the way they are. Use profilers (see -prof, -lprof), design factorial
+experiments, perform baseline and negative tests that provide experimental control, make sure
+the benchmarking environment is safe on JVM/OS/HW level, ask for reviews from the domain experts.
+Do not assume the numbers tell you what you want them to tell.
+
+NOTE: Current JVM experimentally supports Compiler Blackholes, and they are in use. Please exercise
+extra caution when trusting the results, look into the generated code to check the benchmark still
+works, and factor in a small probability of new VM bugs. Additionally, while comparisons between
+different JVMs are already problematic, the performance difference caused by different Blackhole
+modes can be very significant. Please make sure you use the consistent Blackhole mode for comparisons.
+
+Benchmark                         Mode  Cnt      Score      Error  Units
+SearchBenchmark.capturesJdk      thrpt   15  17970.603 ± 1698.663  ops/s
+SearchBenchmark.capturesOhai     thrpt   15  21351.642 ±   51.861  ops/s
+SearchBenchmark.literalJdk       thrpt   15   3284.961 ±   40.734  ops/s
+SearchBenchmark.literalMissJdk   thrpt   15   2457.378 ±  151.881  ops/s
+SearchBenchmark.literalMissOhai  thrpt   15   5169.648 ±  108.772  ops/s
+SearchBenchmark.literalOhai      thrpt   15   4870.164 ±   47.398  ops/s
+SearchBenchmark.multilineJdk     thrpt   15   1030.019 ±    8.488  ops/s
+SearchBenchmark.multilineOhai    thrpt   15    229.016 ±    0.415  ops/s
+SearchBenchmark.unicodeWordJdk   thrpt   15  36710.445 ± 3323.527  ops/s
+SearchBenchmark.unicodeWordOhai  thrpt   15  18796.948 ±  431.352  ops/s
+SearchBenchmark.wordRepeatJdk    thrpt   15  11341.357 ±   49.512  ops/s
+SearchBenchmark.wordRepeatOhai   thrpt   15  91414.547 ±  360.940  ops/s

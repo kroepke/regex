@@ -218,33 +218,68 @@ Key changes:
 
 - Engines: unchanged from stage 14
 - Tests: 2,282 total, 0 failures
-- Key wins vs S14: multiline **+41%** (229 → 336), unicodeWord **+8%** (19k → 18.9k), literalMiss **+7%** (5.1k → 5.5k)
-- charClass neutral (+2%), alternation neutral, captures -3% (within JMH noise)
-- Predicted improvements were larger (multiline 2-4x, charClass +15-30%). The match-delay recording at the top of the outer loop adds per-iteration overhead that offsets part of the guard simplification. Future optimization: eliminate the top-of-loop match check by recording matches only in the dispatch.
+- 3-fork results vs S14: multiline **+41%** (229 → 324), captures stable, charClass -8% (100 → 92)
+- Also includes match-delay elimination (recording `at+1` in dispatch instead of per-iteration delay check)
+- **wordRepeat regression discovered:** 91K (S14) → 56K (S15) = -39%. Under investigation.
 
-## Benchmark Comparison (same machine, 2026-03-15/16/17/18)
+## Benchmark Comparison — Authoritative 3-Fork Results (2026-03-19)
 
-| Benchmark | S1 | S6 | S9 | S10 | S11 | S12 | S13 | S14 | **S15** | JDK | **vs JDK** |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| literal (ops/s) | 14 | 4,663 | 3,326 | 4,787 | 4,880 | 4,956 | 4,821 | 4,930 | **5,223** | 3,422 | **1.53x** |
-| charClass | 0.06 | 70.6 | 60.9 | 81.4 | 83.5 | 94 | 102 | 102 | **102** | 241 | 2.4x |
-| alternation | 6.5 | 45.0 | 39.0 | 44.1 | 45.3 | 46.5 | 46.5 | 46.6 | **48** | 111 | 2.3x |
-| captures | 60 | 350 | 12,362 | 16,928 | 18,190 | 16,499 | 20,939 | 21,290 | **21,377** | 16,629 | **1.29x** |
-| unicodeWord | 13 | 18.3 | 11,291 | 15,267 | 15,037 | 19,807 | 19,264 | 19,070 | **18,875** | 41,074 | 2.2x |
-| multiline | — | — | 192 | 233 | 215 | 215 | 215 | 229 | **336** | 1,086 | 3.2x |
-| literalMiss | — | — | 3,982 | 5,107 | 5,223 | 5,252 | 5,147 | 5,123 | **5,532** | 2,679 | **2.06x** |
-| wordRepeat | — | — | 85,364 | 93,662 | 90,326 | 92,508 | 96,098 | 91,825 | **86,980** | 11,735 | **7.4x** |
+All numbers below are from a single overnight backfill run using proper JMH parameters:
+3 forks, tiered warmup (slow benchmarks: 20s × 10 warmup iters; medium: 10s × 5; fast: 5s × 5).
+Raw data in `docs/benchmarks/stage-*-benchmarks.txt`.
 
-Notes:
+| Benchmark | S6 | S10 | S12 | S14 | **S15** | JDK (S15) | **vs JDK** |
+|---|---|---|---|---|---|---|---|
+| literal (ops/s) | 5,206 | 5,418 | 4,943 | 4,870 | **4,827** | 3,271 | **1.5x faster** |
+| literalMiss | — | 5,658 | 5,279 | 5,170 | **5,172** | 2,447 | **2.1x faster** |
+| charClass | 79 | 91 | 106 | 100 | **92** | 253 | 2.7x slower |
+| alternation | 51 | 52 | 51 | 46 | **46** | 105 | 2.3x slower |
+| captures | 414 | 20,350 | 18,564 | 21,352 | **21,663** | 17,867 | **1.2x faster** |
+| unicodeWord | 21 | 18,112 | 20,379 | 18,797 | **17,449** | 35,172 | 2.0x slower |
+| multiline | — | 275 | 225 | 229 | **324** | 1,031 | 3.2x slower |
+| wordRepeat | — | 103,825 | 94,733 | 91,415 | **55,888** | 11,568 | **4.8x faster** |
+
+### Measurement methodology change (2026-03-19)
+
+All numbers prior to this date (S1–S14 in the old table below) used `@Fork(1)` with 2-second
+iterations and 3 warmup iterations. This was insufficient:
+
+1. **Single-fork misses JIT variance.** wordRepeat measured 87K (1-fork) vs 60K (3-fork) — a 47% discrepancy.
+2. **Short warmup under-warms slow benchmarks.** charClass at ~100 ops/s got only ~600 warmup
+   invocations vs the ~10K C2 needs to compile. charClass and alternation may have been measured
+   with C1/interpreter code in all stages prior to this fix.
+3. **JDK baseline varies ~20% across runs** (charClass JDK: 321 at S6 run, 253 at S15 run).
+   Cross-stage JDK ratios are only meaningful within the same run.
+
+The 3-fork table above is the authoritative reference. The old single-fork table is preserved below
+for historical context but should not be used for performance comparisons.
+
+<details>
+<summary>Historical single-fork numbers (unreliable — click to expand)</summary>
+
+| Benchmark | S1 | S6 | S9 | S10 | S11 | S12 | S13 | S14 | JDK |
+|---|---|---|---|---|---|---|---|---|---|
+| literal (ops/s) | 14 | 4,663 | 3,326 | 4,787 | 4,880 | 4,956 | 4,821 | 4,930 | 2,564 |
+| charClass | 0.06 | 70.6 | 60.9 | 81.4 | 83.5 | 94 | 102 | 102 | 289 |
+| alternation | 6.5 | 45.0 | 39.0 | 44.1 | 45.3 | 46.5 | 46.5 | 46.6 | 105 |
+| captures | 60 | 350 | 12,362 | 16,928 | 18,190 | 16,499 | 20,939 | 21,290 | 18,831 |
+| unicodeWord | 13 | 18.3 | 11,291 | 15,267 | 15,037 | 19,807 | 19,264 | 19,070 | 38,147 |
+| multiline | — | — | 192 | 233 | 215 | 215 | 215 | 229 | 1,034 |
+| literalMiss | — | — | 3,982 | 5,107 | 5,223 | 5,252 | 5,147 | 5,123 | 3,248 |
+| wordRepeat | — | — | 85,364 | 93,662 | 90,326 | 92,508 | 96,098 | 91,825 | 11,246 |
+
+</details>
+
+### Key findings from the re-measurement
+
+1. **wordRepeat regression is real and large.** S10 (103,825) → S12 (94,733) → S14 (91,415) → S15 (55,888). The dense DFA introduction (S12) started the decline, and the special-state taxonomy (S15) accelerated it. Under investigation.
+2. **charClass peaked at S12 (106) and has regressed.** S12 → S14 (100) → S15 (92). The dense DFA was the high point; subsequent changes to the search loop shape have hurt.
+3. **multiline improvement is confirmed.** S14 (229) → S15 (324) = +41%. The taxonomy dispatch with acceleration is working.
+4. **captures is stable and competitive.** 21,663 vs JDK 17,867 = 1.2x faster since S10.
+5. **literal/literalMiss are stable.** These use PrefilterOnly strategy (indexOf), not affected by DFA changes.
+
+### Historical notes (from single-fork era)
 - S4 unicodeWord (15,717) was based on three-phase with DFA edge bugs (27 test failures). S7 unicodeWord (13,499) is fully correct.
 - S5 regressions vs S4 were caused by the removal of three-phase search, not the prefilter work.
-- S7 unicodeWord improvement is from equivalence class merging + surrogate-pair resolution, enabling the DFA to handle full Unicode without quit fallback.
-- S8 SearchBenchmark charClass improvement is modest (75→76) because the high-level API still allocates Match+substring per match. The raw engine benchmark (RawEngineBenchmark) shows the true engine improvement: 70 → 91 ops/s (+30%). The profiling component test shows the three-phase core improved from 13,890 µs to 10,968 µs (-21%).
-- S9 captures improvement is from the one-pass DFA replacing PikeVM on the narrowed capture window. Non-capture benchmarks show variance from single-fork JMH runs (not regressions — re-running produces numbers consistent with S8).
-- S10 same-session comparison (Phase 1 baseline→post) is the reliable measurement: captures +18%, unicodeWord +12%, charClass +12%, multiline +16%. The S9→S10 deltas appear larger due to single-fork JMH variance across different runs.
-- S11 same-session comparison vs S10 baseline: rawUnicodeWord +14%, multiline +5%, charClass +4%. The `charsSearched` elimination was the key micro-optimization — removing 8 long operations per unrolled iteration from the hot loop.
-- S11 multiline numbers were inflated by single-fork JMH variance (238 SearchBenchmark vs 216 RawEngine — impossible since SearchBenchmark has more overhead). The 5-fork S12 measurement (215 ±1.2) is the correct baseline for multiline.
-- S12 captures regression (18,190 → 16,499) is from dense DFA having different search characteristics than lazy DFA for this pattern. Still competitive with JDK (0.92x). The charClass +17% and unicodeWord +25% wins are the primary S12 gains.
-- S12 DenseDFA.searchFwd is 330 bytecodes — well within C2's optimization zone, all classify calls inlined. Separate JIT budget from LazyDFA's searchFwdLong.
-- S12 captures regression (18k→16.5k) was fixed by S13 acceleration — the escape-table scan in the matching state reduced per-char overhead enough to recover and exceed the baseline.
-- S13 acceleration benefits charClass the most (+27% from S11) because the matching state self-loops on `[a-zA-Z]` with a single escape class.
+- S7 unicodeWord improvement is from equivalence class merging + surrogate-pair resolution.
+- S9 captures improvement is from the one-pass DFA replacing PikeVM on the narrowed capture window.
